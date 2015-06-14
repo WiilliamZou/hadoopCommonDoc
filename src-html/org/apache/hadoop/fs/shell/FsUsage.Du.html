@@ -1,0 +1,337 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html lang="en">
+<head>
+<title>Source code</title>
+<link rel="stylesheet" type="text/css" href="../../../../../../stylesheet.css" title="Style">
+</head>
+<body>
+<div class="sourceContainer">
+<pre><span class="sourceLineNo">001</span>/**<a name="line.1"></a>
+<span class="sourceLineNo">002</span> * Licensed to the Apache Software Foundation (ASF) under one<a name="line.2"></a>
+<span class="sourceLineNo">003</span> * or more contributor license agreements.  See the NOTICE file<a name="line.3"></a>
+<span class="sourceLineNo">004</span> * distributed with this work for additional information<a name="line.4"></a>
+<span class="sourceLineNo">005</span> * regarding copyright ownership.  The ASF licenses this file<a name="line.5"></a>
+<span class="sourceLineNo">006</span> * to you under the Apache License, Version 2.0 (the<a name="line.6"></a>
+<span class="sourceLineNo">007</span> * "License"); you may not use this file except in compliance<a name="line.7"></a>
+<span class="sourceLineNo">008</span> * with the License.  You may obtain a copy of the License at<a name="line.8"></a>
+<span class="sourceLineNo">009</span> *<a name="line.9"></a>
+<span class="sourceLineNo">010</span> *     http://www.apache.org/licenses/LICENSE-2.0<a name="line.10"></a>
+<span class="sourceLineNo">011</span> *<a name="line.11"></a>
+<span class="sourceLineNo">012</span> * Unless required by applicable law or agreed to in writing, software<a name="line.12"></a>
+<span class="sourceLineNo">013</span> * distributed under the License is distributed on an "AS IS" BASIS,<a name="line.13"></a>
+<span class="sourceLineNo">014</span> * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.<a name="line.14"></a>
+<span class="sourceLineNo">015</span> * See the License for the specific language governing permissions and<a name="line.15"></a>
+<span class="sourceLineNo">016</span> * limitations under the License.<a name="line.16"></a>
+<span class="sourceLineNo">017</span> */<a name="line.17"></a>
+<span class="sourceLineNo">018</span><a name="line.18"></a>
+<span class="sourceLineNo">019</span>package org.apache.hadoop.fs.shell;<a name="line.19"></a>
+<span class="sourceLineNo">020</span><a name="line.20"></a>
+<span class="sourceLineNo">021</span>import java.io.IOException;<a name="line.21"></a>
+<span class="sourceLineNo">022</span>import java.io.PrintStream;<a name="line.22"></a>
+<span class="sourceLineNo">023</span>import java.util.ArrayList;<a name="line.23"></a>
+<span class="sourceLineNo">024</span>import java.util.LinkedList;<a name="line.24"></a>
+<span class="sourceLineNo">025</span>import java.util.List;<a name="line.25"></a>
+<span class="sourceLineNo">026</span><a name="line.26"></a>
+<span class="sourceLineNo">027</span>import org.apache.hadoop.classification.InterfaceAudience;<a name="line.27"></a>
+<span class="sourceLineNo">028</span>import org.apache.hadoop.classification.InterfaceStability;<a name="line.28"></a>
+<span class="sourceLineNo">029</span>import org.apache.hadoop.fs.FsStatus;<a name="line.29"></a>
+<span class="sourceLineNo">030</span>import org.apache.hadoop.fs.Path;<a name="line.30"></a>
+<span class="sourceLineNo">031</span>import org.apache.hadoop.util.StringUtils;<a name="line.31"></a>
+<span class="sourceLineNo">032</span><a name="line.32"></a>
+<span class="sourceLineNo">033</span>/** Base class for commands related to viewing filesystem usage, such as<a name="line.33"></a>
+<span class="sourceLineNo">034</span> * du and df<a name="line.34"></a>
+<span class="sourceLineNo">035</span> */<a name="line.35"></a>
+<span class="sourceLineNo">036</span>@InterfaceAudience.Private<a name="line.36"></a>
+<span class="sourceLineNo">037</span>@InterfaceStability.Evolving<a name="line.37"></a>
+<span class="sourceLineNo">038</span><a name="line.38"></a>
+<span class="sourceLineNo">039</span>class FsUsage extends FsCommand {<a name="line.39"></a>
+<span class="sourceLineNo">040</span>  public static void registerCommands(CommandFactory factory) {<a name="line.40"></a>
+<span class="sourceLineNo">041</span>    factory.addClass(Df.class, "-df");<a name="line.41"></a>
+<span class="sourceLineNo">042</span>    factory.addClass(Du.class, "-du");<a name="line.42"></a>
+<span class="sourceLineNo">043</span>    factory.addClass(Dus.class, "-dus");<a name="line.43"></a>
+<span class="sourceLineNo">044</span>  }<a name="line.44"></a>
+<span class="sourceLineNo">045</span><a name="line.45"></a>
+<span class="sourceLineNo">046</span>  protected boolean humanReadable = false;<a name="line.46"></a>
+<span class="sourceLineNo">047</span>  protected TableBuilder usagesTable;<a name="line.47"></a>
+<span class="sourceLineNo">048</span>  <a name="line.48"></a>
+<span class="sourceLineNo">049</span>  protected String formatSize(long size) {<a name="line.49"></a>
+<span class="sourceLineNo">050</span>    return humanReadable<a name="line.50"></a>
+<span class="sourceLineNo">051</span>        ? StringUtils.TraditionalBinaryPrefix.long2String(size, "", 1)<a name="line.51"></a>
+<span class="sourceLineNo">052</span>        : String.valueOf(size);<a name="line.52"></a>
+<span class="sourceLineNo">053</span>  }<a name="line.53"></a>
+<span class="sourceLineNo">054</span><a name="line.54"></a>
+<span class="sourceLineNo">055</span>  /** Show the size of a partition in the filesystem */<a name="line.55"></a>
+<span class="sourceLineNo">056</span>  public static class Df extends FsUsage {<a name="line.56"></a>
+<span class="sourceLineNo">057</span>    public static final String NAME = "df";<a name="line.57"></a>
+<span class="sourceLineNo">058</span>    public static final String USAGE = "[-h] [&lt;path&gt; ...]";<a name="line.58"></a>
+<span class="sourceLineNo">059</span>    public static final String DESCRIPTION =<a name="line.59"></a>
+<span class="sourceLineNo">060</span>      "Shows the capacity, free and used space of the filesystem. "+<a name="line.60"></a>
+<span class="sourceLineNo">061</span>      "If the filesystem has multiple partitions, and no path to a " +<a name="line.61"></a>
+<span class="sourceLineNo">062</span>      "particular partition is specified, then the status of the root " +<a name="line.62"></a>
+<span class="sourceLineNo">063</span>      "partitions will be shown.\n" +<a name="line.63"></a>
+<span class="sourceLineNo">064</span>      "-h: Formats the sizes of files in a human-readable fashion " +<a name="line.64"></a>
+<span class="sourceLineNo">065</span>      "rather than a number of bytes.";<a name="line.65"></a>
+<span class="sourceLineNo">066</span>    <a name="line.66"></a>
+<span class="sourceLineNo">067</span>    @Override<a name="line.67"></a>
+<span class="sourceLineNo">068</span>    protected void processOptions(LinkedList&lt;String&gt; args)<a name="line.68"></a>
+<span class="sourceLineNo">069</span>    throws IOException {<a name="line.69"></a>
+<span class="sourceLineNo">070</span>      CommandFormat cf = new CommandFormat(0, Integer.MAX_VALUE, "h");<a name="line.70"></a>
+<span class="sourceLineNo">071</span>      cf.parse(args);<a name="line.71"></a>
+<span class="sourceLineNo">072</span>      humanReadable = cf.getOpt("h");<a name="line.72"></a>
+<span class="sourceLineNo">073</span>      if (args.isEmpty()) args.add(Path.SEPARATOR);<a name="line.73"></a>
+<span class="sourceLineNo">074</span>    }<a name="line.74"></a>
+<span class="sourceLineNo">075</span><a name="line.75"></a>
+<span class="sourceLineNo">076</span>    @Override<a name="line.76"></a>
+<span class="sourceLineNo">077</span>    protected void processArguments(LinkedList&lt;PathData&gt; args)<a name="line.77"></a>
+<span class="sourceLineNo">078</span>    throws IOException {<a name="line.78"></a>
+<span class="sourceLineNo">079</span>      usagesTable = new TableBuilder(<a name="line.79"></a>
+<span class="sourceLineNo">080</span>          "Filesystem", "Size", "Used", "Available", "Use%");<a name="line.80"></a>
+<span class="sourceLineNo">081</span>      usagesTable.setRightAlign(1, 2, 3, 4);<a name="line.81"></a>
+<span class="sourceLineNo">082</span>      <a name="line.82"></a>
+<span class="sourceLineNo">083</span>      super.processArguments(args);<a name="line.83"></a>
+<span class="sourceLineNo">084</span>      if (!usagesTable.isEmpty()) {<a name="line.84"></a>
+<span class="sourceLineNo">085</span>        usagesTable.printToStream(out);<a name="line.85"></a>
+<span class="sourceLineNo">086</span>      }<a name="line.86"></a>
+<span class="sourceLineNo">087</span>    }<a name="line.87"></a>
+<span class="sourceLineNo">088</span><a name="line.88"></a>
+<span class="sourceLineNo">089</span>    @Override<a name="line.89"></a>
+<span class="sourceLineNo">090</span>    protected void processPath(PathData item) throws IOException {<a name="line.90"></a>
+<span class="sourceLineNo">091</span>      FsStatus fsStats = item.fs.getStatus(item.path);<a name="line.91"></a>
+<span class="sourceLineNo">092</span>      long size = fsStats.getCapacity();<a name="line.92"></a>
+<span class="sourceLineNo">093</span>      long used = fsStats.getUsed();<a name="line.93"></a>
+<span class="sourceLineNo">094</span>      long free = fsStats.getRemaining();<a name="line.94"></a>
+<span class="sourceLineNo">095</span><a name="line.95"></a>
+<span class="sourceLineNo">096</span>      usagesTable.addRow(<a name="line.96"></a>
+<span class="sourceLineNo">097</span>          item.fs.getUri(),<a name="line.97"></a>
+<span class="sourceLineNo">098</span>          formatSize(size),<a name="line.98"></a>
+<span class="sourceLineNo">099</span>          formatSize(used),<a name="line.99"></a>
+<span class="sourceLineNo">100</span>          formatSize(free),<a name="line.100"></a>
+<span class="sourceLineNo">101</span>          StringUtils.formatPercent((double)used/(double)size, 0)<a name="line.101"></a>
+<span class="sourceLineNo">102</span>      );<a name="line.102"></a>
+<span class="sourceLineNo">103</span>    }<a name="line.103"></a>
+<span class="sourceLineNo">104</span>  }<a name="line.104"></a>
+<span class="sourceLineNo">105</span><a name="line.105"></a>
+<span class="sourceLineNo">106</span>  /** show disk usage */<a name="line.106"></a>
+<span class="sourceLineNo">107</span>  public static class Du extends FsUsage {<a name="line.107"></a>
+<span class="sourceLineNo">108</span>    public static final String NAME = "du";<a name="line.108"></a>
+<span class="sourceLineNo">109</span>    public static final String USAGE = "[-s] [-h] &lt;path&gt; ...";<a name="line.109"></a>
+<span class="sourceLineNo">110</span>    public static final String DESCRIPTION =<a name="line.110"></a>
+<span class="sourceLineNo">111</span>    "Show the amount of space, in bytes, used by the files that " +<a name="line.111"></a>
+<span class="sourceLineNo">112</span>    "match the specified file pattern. The following flags are optional:\n" +<a name="line.112"></a>
+<span class="sourceLineNo">113</span>    "-s: Rather than showing the size of each individual file that" +<a name="line.113"></a>
+<span class="sourceLineNo">114</span>    " matches the pattern, shows the total (summary) size.\n" +<a name="line.114"></a>
+<span class="sourceLineNo">115</span>    "-h: Formats the sizes of files in a human-readable fashion" +<a name="line.115"></a>
+<span class="sourceLineNo">116</span>    " rather than a number of bytes.\n\n" +<a name="line.116"></a>
+<span class="sourceLineNo">117</span>    "Note that, even without the -s option, this only shows size summaries " +<a name="line.117"></a>
+<span class="sourceLineNo">118</span>    "one level deep into a directory.\n\n" +<a name="line.118"></a>
+<span class="sourceLineNo">119</span>    "The output is in the form \n" + <a name="line.119"></a>
+<span class="sourceLineNo">120</span>    "\tsize\tname(full path)\n"; <a name="line.120"></a>
+<span class="sourceLineNo">121</span><a name="line.121"></a>
+<span class="sourceLineNo">122</span>    protected boolean summary = false;<a name="line.122"></a>
+<span class="sourceLineNo">123</span>    <a name="line.123"></a>
+<span class="sourceLineNo">124</span>    @Override<a name="line.124"></a>
+<span class="sourceLineNo">125</span>    protected void processOptions(LinkedList&lt;String&gt; args) throws IOException {<a name="line.125"></a>
+<span class="sourceLineNo">126</span>      CommandFormat cf = new CommandFormat(0, Integer.MAX_VALUE, "h", "s");<a name="line.126"></a>
+<span class="sourceLineNo">127</span>      cf.parse(args);<a name="line.127"></a>
+<span class="sourceLineNo">128</span>      humanReadable = cf.getOpt("h");<a name="line.128"></a>
+<span class="sourceLineNo">129</span>      summary = cf.getOpt("s");<a name="line.129"></a>
+<span class="sourceLineNo">130</span>      if (args.isEmpty()) args.add(Path.CUR_DIR);<a name="line.130"></a>
+<span class="sourceLineNo">131</span>    }<a name="line.131"></a>
+<span class="sourceLineNo">132</span><a name="line.132"></a>
+<span class="sourceLineNo">133</span>    @Override<a name="line.133"></a>
+<span class="sourceLineNo">134</span>    protected void processPathArgument(PathData item) throws IOException {<a name="line.134"></a>
+<span class="sourceLineNo">135</span>      usagesTable = new TableBuilder(2);<a name="line.135"></a>
+<span class="sourceLineNo">136</span>      // go one level deep on dirs from cmdline unless in summary mode<a name="line.136"></a>
+<span class="sourceLineNo">137</span>      if (!summary &amp;&amp; item.stat.isDirectory()) {<a name="line.137"></a>
+<span class="sourceLineNo">138</span>        recursePath(item);<a name="line.138"></a>
+<span class="sourceLineNo">139</span>      } else {<a name="line.139"></a>
+<span class="sourceLineNo">140</span>        super.processPathArgument(item);<a name="line.140"></a>
+<span class="sourceLineNo">141</span>      }<a name="line.141"></a>
+<span class="sourceLineNo">142</span>      usagesTable.printToStream(out);<a name="line.142"></a>
+<span class="sourceLineNo">143</span>    }<a name="line.143"></a>
+<span class="sourceLineNo">144</span><a name="line.144"></a>
+<span class="sourceLineNo">145</span>    @Override<a name="line.145"></a>
+<span class="sourceLineNo">146</span>    protected void processPath(PathData item) throws IOException {<a name="line.146"></a>
+<span class="sourceLineNo">147</span>      long length;<a name="line.147"></a>
+<span class="sourceLineNo">148</span>      if (item.stat.isDirectory()) {<a name="line.148"></a>
+<span class="sourceLineNo">149</span>        length = item.fs.getContentSummary(item.path).getLength();<a name="line.149"></a>
+<span class="sourceLineNo">150</span>      } else {<a name="line.150"></a>
+<span class="sourceLineNo">151</span>        length = item.stat.getLen();<a name="line.151"></a>
+<span class="sourceLineNo">152</span>      }<a name="line.152"></a>
+<span class="sourceLineNo">153</span>      usagesTable.addRow(formatSize(length), item);<a name="line.153"></a>
+<span class="sourceLineNo">154</span>    }<a name="line.154"></a>
+<span class="sourceLineNo">155</span>  }<a name="line.155"></a>
+<span class="sourceLineNo">156</span><a name="line.156"></a>
+<span class="sourceLineNo">157</span>  /** show disk usage summary */<a name="line.157"></a>
+<span class="sourceLineNo">158</span>  public static class Dus extends Du {<a name="line.158"></a>
+<span class="sourceLineNo">159</span>    public static final String NAME = "dus";<a name="line.159"></a>
+<span class="sourceLineNo">160</span><a name="line.160"></a>
+<span class="sourceLineNo">161</span>    @Override<a name="line.161"></a>
+<span class="sourceLineNo">162</span>    protected void processOptions(LinkedList&lt;String&gt; args) throws IOException {<a name="line.162"></a>
+<span class="sourceLineNo">163</span>      args.addFirst("-s");<a name="line.163"></a>
+<span class="sourceLineNo">164</span>      super.processOptions(args);<a name="line.164"></a>
+<span class="sourceLineNo">165</span>    }<a name="line.165"></a>
+<span class="sourceLineNo">166</span>    <a name="line.166"></a>
+<span class="sourceLineNo">167</span>    @Override<a name="line.167"></a>
+<span class="sourceLineNo">168</span>    public String getReplacementCommand() {<a name="line.168"></a>
+<span class="sourceLineNo">169</span>      return "du -s";<a name="line.169"></a>
+<span class="sourceLineNo">170</span>    }<a name="line.170"></a>
+<span class="sourceLineNo">171</span>  }<a name="line.171"></a>
+<span class="sourceLineNo">172</span><a name="line.172"></a>
+<span class="sourceLineNo">173</span>  /**<a name="line.173"></a>
+<span class="sourceLineNo">174</span>   * Creates a table of aligned values based on the maximum width of each<a name="line.174"></a>
+<span class="sourceLineNo">175</span>   * column as a string<a name="line.175"></a>
+<span class="sourceLineNo">176</span>   */<a name="line.176"></a>
+<span class="sourceLineNo">177</span>  private static class TableBuilder {<a name="line.177"></a>
+<span class="sourceLineNo">178</span>    protected boolean hasHeader = false;<a name="line.178"></a>
+<span class="sourceLineNo">179</span>    protected List&lt;String[]&gt; rows;<a name="line.179"></a>
+<span class="sourceLineNo">180</span>    protected int[] widths;<a name="line.180"></a>
+<span class="sourceLineNo">181</span>    protected boolean[] rightAlign;<a name="line.181"></a>
+<span class="sourceLineNo">182</span>    <a name="line.182"></a>
+<span class="sourceLineNo">183</span>    /**<a name="line.183"></a>
+<span class="sourceLineNo">184</span>     * Create a table w/o headers<a name="line.184"></a>
+<span class="sourceLineNo">185</span>     * @param columns number of columns<a name="line.185"></a>
+<span class="sourceLineNo">186</span>     */<a name="line.186"></a>
+<span class="sourceLineNo">187</span>    public TableBuilder(int columns) {<a name="line.187"></a>
+<span class="sourceLineNo">188</span>      rows = new ArrayList&lt;String[]&gt;();<a name="line.188"></a>
+<span class="sourceLineNo">189</span>      widths = new int[columns];<a name="line.189"></a>
+<span class="sourceLineNo">190</span>      rightAlign = new boolean[columns];<a name="line.190"></a>
+<span class="sourceLineNo">191</span>    }<a name="line.191"></a>
+<span class="sourceLineNo">192</span><a name="line.192"></a>
+<span class="sourceLineNo">193</span>    /**<a name="line.193"></a>
+<span class="sourceLineNo">194</span>     * Create a table with headers<a name="line.194"></a>
+<span class="sourceLineNo">195</span>     * @param headers list of headers<a name="line.195"></a>
+<span class="sourceLineNo">196</span>     */<a name="line.196"></a>
+<span class="sourceLineNo">197</span>    public TableBuilder(Object ... headers) {<a name="line.197"></a>
+<span class="sourceLineNo">198</span>      this(headers.length);<a name="line.198"></a>
+<span class="sourceLineNo">199</span>      this.addRow(headers);<a name="line.199"></a>
+<span class="sourceLineNo">200</span>      hasHeader = true;<a name="line.200"></a>
+<span class="sourceLineNo">201</span>    }<a name="line.201"></a>
+<span class="sourceLineNo">202</span><a name="line.202"></a>
+<span class="sourceLineNo">203</span>    /**<a name="line.203"></a>
+<span class="sourceLineNo">204</span>     * Change the default left-align of columns<a name="line.204"></a>
+<span class="sourceLineNo">205</span>     * @param indexes of columns to right align<a name="line.205"></a>
+<span class="sourceLineNo">206</span>     */<a name="line.206"></a>
+<span class="sourceLineNo">207</span>    public void setRightAlign(int ... indexes) {<a name="line.207"></a>
+<span class="sourceLineNo">208</span>      for (int i : indexes) rightAlign[i] = true;<a name="line.208"></a>
+<span class="sourceLineNo">209</span>    }<a name="line.209"></a>
+<span class="sourceLineNo">210</span>    <a name="line.210"></a>
+<span class="sourceLineNo">211</span>    /**<a name="line.211"></a>
+<span class="sourceLineNo">212</span>     * Add a row of objects to the table<a name="line.212"></a>
+<span class="sourceLineNo">213</span>     * @param objects the values<a name="line.213"></a>
+<span class="sourceLineNo">214</span>     */<a name="line.214"></a>
+<span class="sourceLineNo">215</span>    public void addRow(Object ... objects) {<a name="line.215"></a>
+<span class="sourceLineNo">216</span>      String[] row = new String[widths.length];<a name="line.216"></a>
+<span class="sourceLineNo">217</span>      for (int col=0; col &lt; widths.length; col++) {<a name="line.217"></a>
+<span class="sourceLineNo">218</span>        row[col] = String.valueOf(objects[col]);<a name="line.218"></a>
+<span class="sourceLineNo">219</span>        widths[col] = Math.max(widths[col], row[col].length());<a name="line.219"></a>
+<span class="sourceLineNo">220</span>      }<a name="line.220"></a>
+<span class="sourceLineNo">221</span>      rows.add(row);<a name="line.221"></a>
+<span class="sourceLineNo">222</span>    }<a name="line.222"></a>
+<span class="sourceLineNo">223</span><a name="line.223"></a>
+<span class="sourceLineNo">224</span>    /**<a name="line.224"></a>
+<span class="sourceLineNo">225</span>     * Render the table to a stream <a name="line.225"></a>
+<span class="sourceLineNo">226</span>     * @param out PrintStream for output<a name="line.226"></a>
+<span class="sourceLineNo">227</span>     */<a name="line.227"></a>
+<span class="sourceLineNo">228</span>    public void printToStream(PrintStream out) {<a name="line.228"></a>
+<span class="sourceLineNo">229</span>      if (isEmpty()) return;<a name="line.229"></a>
+<span class="sourceLineNo">230</span><a name="line.230"></a>
+<span class="sourceLineNo">231</span>      StringBuilder fmt = new StringBuilder();      <a name="line.231"></a>
+<span class="sourceLineNo">232</span>      for (int i=0; i &lt; widths.length; i++) {<a name="line.232"></a>
+<span class="sourceLineNo">233</span>        if (fmt.length() != 0) fmt.append("  ");<a name="line.233"></a>
+<span class="sourceLineNo">234</span>        if (rightAlign[i]) {<a name="line.234"></a>
+<span class="sourceLineNo">235</span>          fmt.append("%"+widths[i]+"s");<a name="line.235"></a>
+<span class="sourceLineNo">236</span>        } else if (i != widths.length-1) {<a name="line.236"></a>
+<span class="sourceLineNo">237</span>          fmt.append("%-"+widths[i]+"s");<a name="line.237"></a>
+<span class="sourceLineNo">238</span>        } else {<a name="line.238"></a>
+<span class="sourceLineNo">239</span>          // prevent trailing spaces if the final column is left-aligned<a name="line.239"></a>
+<span class="sourceLineNo">240</span>          fmt.append("%s");<a name="line.240"></a>
+<span class="sourceLineNo">241</span>        }<a name="line.241"></a>
+<span class="sourceLineNo">242</span>      }<a name="line.242"></a>
+<span class="sourceLineNo">243</span><a name="line.243"></a>
+<span class="sourceLineNo">244</span>      for (Object[] row : rows) {<a name="line.244"></a>
+<span class="sourceLineNo">245</span>        out.println(String.format(fmt.toString(), row));<a name="line.245"></a>
+<span class="sourceLineNo">246</span>      }<a name="line.246"></a>
+<span class="sourceLineNo">247</span>    }<a name="line.247"></a>
+<span class="sourceLineNo">248</span>    <a name="line.248"></a>
+<span class="sourceLineNo">249</span>    /**<a name="line.249"></a>
+<span class="sourceLineNo">250</span>     * Number of rows excluding header <a name="line.250"></a>
+<span class="sourceLineNo">251</span>     * @return rows<a name="line.251"></a>
+<span class="sourceLineNo">252</span>     */<a name="line.252"></a>
+<span class="sourceLineNo">253</span>    public int size() {<a name="line.253"></a>
+<span class="sourceLineNo">254</span>      return rows.size() - (hasHeader ? 1 : 0);<a name="line.254"></a>
+<span class="sourceLineNo">255</span>    }<a name="line.255"></a>
+<span class="sourceLineNo">256</span><a name="line.256"></a>
+<span class="sourceLineNo">257</span>    /**<a name="line.257"></a>
+<span class="sourceLineNo">258</span>     * Does table have any rows <a name="line.258"></a>
+<span class="sourceLineNo">259</span>     * @return boolean<a name="line.259"></a>
+<span class="sourceLineNo">260</span>     */<a name="line.260"></a>
+<span class="sourceLineNo">261</span>    public boolean isEmpty() {<a name="line.261"></a>
+<span class="sourceLineNo">262</span>      return size() == 0;<a name="line.262"></a>
+<span class="sourceLineNo">263</span>    }<a name="line.263"></a>
+<span class="sourceLineNo">264</span>  }<a name="line.264"></a>
+<span class="sourceLineNo">265</span>}<a name="line.265"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+</div>
+</body>
+</html>

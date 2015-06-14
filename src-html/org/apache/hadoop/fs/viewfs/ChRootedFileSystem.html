@@ -1,0 +1,472 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html lang="en">
+<head>
+<title>Source code</title>
+<link rel="stylesheet" type="text/css" href="../../../../../../stylesheet.css" title="Style">
+</head>
+<body>
+<div class="sourceContainer">
+<pre><span class="sourceLineNo">001</span>/**<a name="line.1"></a>
+<span class="sourceLineNo">002</span> * Licensed to the Apache Software Foundation (ASF) under one<a name="line.2"></a>
+<span class="sourceLineNo">003</span> * or more contributor license agreements.  See the NOTICE file<a name="line.3"></a>
+<span class="sourceLineNo">004</span> * distributed with this work for additional information<a name="line.4"></a>
+<span class="sourceLineNo">005</span> * regarding copyright ownership.  The ASF licenses this file<a name="line.5"></a>
+<span class="sourceLineNo">006</span> * to you under the Apache License, Version 2.0 (the<a name="line.6"></a>
+<span class="sourceLineNo">007</span> * "License"); you may not use this file except in compliance<a name="line.7"></a>
+<span class="sourceLineNo">008</span> * with the License.  You may obtain a copy of the License at<a name="line.8"></a>
+<span class="sourceLineNo">009</span> *<a name="line.9"></a>
+<span class="sourceLineNo">010</span> *     http://www.apache.org/licenses/LICENSE-2.0<a name="line.10"></a>
+<span class="sourceLineNo">011</span> *<a name="line.11"></a>
+<span class="sourceLineNo">012</span> * Unless required by applicable law or agreed to in writing, software<a name="line.12"></a>
+<span class="sourceLineNo">013</span> * distributed under the License is distributed on an "AS IS" BASIS,<a name="line.13"></a>
+<span class="sourceLineNo">014</span> * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.<a name="line.14"></a>
+<span class="sourceLineNo">015</span> * See the License for the specific language governing permissions and<a name="line.15"></a>
+<span class="sourceLineNo">016</span> * limitations under the License.<a name="line.16"></a>
+<span class="sourceLineNo">017</span> */<a name="line.17"></a>
+<span class="sourceLineNo">018</span>package org.apache.hadoop.fs.viewfs;<a name="line.18"></a>
+<span class="sourceLineNo">019</span>import java.io.FileNotFoundException;<a name="line.19"></a>
+<span class="sourceLineNo">020</span>import java.io.IOException;<a name="line.20"></a>
+<span class="sourceLineNo">021</span>import java.net.URI;<a name="line.21"></a>
+<span class="sourceLineNo">022</span>import java.util.EnumSet;<a name="line.22"></a>
+<span class="sourceLineNo">023</span>import java.util.List;<a name="line.23"></a>
+<span class="sourceLineNo">024</span>import java.util.Map;<a name="line.24"></a>
+<span class="sourceLineNo">025</span><a name="line.25"></a>
+<span class="sourceLineNo">026</span>import org.apache.hadoop.classification.InterfaceAudience;<a name="line.26"></a>
+<span class="sourceLineNo">027</span>import org.apache.hadoop.classification.InterfaceStability;<a name="line.27"></a>
+<span class="sourceLineNo">028</span>import org.apache.hadoop.conf.Configuration;<a name="line.28"></a>
+<span class="sourceLineNo">029</span>import org.apache.hadoop.fs.BlockLocation;<a name="line.29"></a>
+<span class="sourceLineNo">030</span>import org.apache.hadoop.fs.ContentSummary;<a name="line.30"></a>
+<span class="sourceLineNo">031</span>import org.apache.hadoop.fs.CreateFlag;<a name="line.31"></a>
+<span class="sourceLineNo">032</span>import org.apache.hadoop.fs.FSDataInputStream;<a name="line.32"></a>
+<span class="sourceLineNo">033</span>import org.apache.hadoop.fs.FSDataOutputStream;<a name="line.33"></a>
+<span class="sourceLineNo">034</span>import org.apache.hadoop.fs.FileChecksum;<a name="line.34"></a>
+<span class="sourceLineNo">035</span>import org.apache.hadoop.fs.FileStatus;<a name="line.35"></a>
+<span class="sourceLineNo">036</span>import org.apache.hadoop.fs.FileSystem;<a name="line.36"></a>
+<span class="sourceLineNo">037</span>import org.apache.hadoop.fs.FilterFileSystem;<a name="line.37"></a>
+<span class="sourceLineNo">038</span>import org.apache.hadoop.fs.FsServerDefaults;<a name="line.38"></a>
+<span class="sourceLineNo">039</span>import org.apache.hadoop.fs.FsStatus;<a name="line.39"></a>
+<span class="sourceLineNo">040</span>import org.apache.hadoop.fs.Path;<a name="line.40"></a>
+<span class="sourceLineNo">041</span>import org.apache.hadoop.fs.XAttrSetFlag;<a name="line.41"></a>
+<span class="sourceLineNo">042</span>import org.apache.hadoop.fs.permission.AclEntry;<a name="line.42"></a>
+<span class="sourceLineNo">043</span>import org.apache.hadoop.fs.permission.AclStatus;<a name="line.43"></a>
+<span class="sourceLineNo">044</span>import org.apache.hadoop.fs.permission.FsAction;<a name="line.44"></a>
+<span class="sourceLineNo">045</span>import org.apache.hadoop.fs.permission.FsPermission;<a name="line.45"></a>
+<span class="sourceLineNo">046</span>import org.apache.hadoop.security.AccessControlException;<a name="line.46"></a>
+<span class="sourceLineNo">047</span>import org.apache.hadoop.util.Progressable;<a name="line.47"></a>
+<span class="sourceLineNo">048</span><a name="line.48"></a>
+<span class="sourceLineNo">049</span>/**<a name="line.49"></a>
+<span class="sourceLineNo">050</span> * &lt;code&gt;ChRootedFileSystem&lt;/code&gt; is a file system with its root some path<a name="line.50"></a>
+<span class="sourceLineNo">051</span> * below the root of its base file system. <a name="line.51"></a>
+<span class="sourceLineNo">052</span> * <a name="line.52"></a>
+<span class="sourceLineNo">053</span> * Example: For a base file system hdfs://nn1/ with chRoot at /usr/foo, the<a name="line.53"></a>
+<span class="sourceLineNo">054</span> * members will be setup as shown below.<a name="line.54"></a>
+<span class="sourceLineNo">055</span> * &lt;ul&gt;<a name="line.55"></a>
+<span class="sourceLineNo">056</span> * &lt;li&gt;myFs is the base file system and points to hdfs at nn1&lt;/li&gt;<a name="line.56"></a>
+<span class="sourceLineNo">057</span> * &lt;li&gt;myURI is hdfs://nn1/user/foo&lt;/li&gt;<a name="line.57"></a>
+<span class="sourceLineNo">058</span> * &lt;li&gt;chRootPathPart is /user/foo&lt;/li&gt;<a name="line.58"></a>
+<span class="sourceLineNo">059</span> * &lt;li&gt;workingDir is a directory related to chRoot&lt;/li&gt;<a name="line.59"></a>
+<span class="sourceLineNo">060</span> * &lt;/ul&gt;<a name="line.60"></a>
+<span class="sourceLineNo">061</span> * <a name="line.61"></a>
+<span class="sourceLineNo">062</span> * The paths are resolved as follows by ChRootedFileSystem:<a name="line.62"></a>
+<span class="sourceLineNo">063</span> * &lt;ul&gt;<a name="line.63"></a>
+<span class="sourceLineNo">064</span> * &lt;li&gt; Absolute path /a/b/c is resolved to /user/foo/a/b/c at myFs&lt;/li&gt;<a name="line.64"></a>
+<span class="sourceLineNo">065</span> * &lt;li&gt; Relative path x/y is resolved to /user/foo/&lt;workingDir&gt;/x/y&lt;/li&gt;<a name="line.65"></a>
+<span class="sourceLineNo">066</span> * &lt;/ul&gt;<a name="line.66"></a>
+<span class="sourceLineNo">067</span> */<a name="line.67"></a>
+<span class="sourceLineNo">068</span><a name="line.68"></a>
+<span class="sourceLineNo">069</span>@InterfaceAudience.Private<a name="line.69"></a>
+<span class="sourceLineNo">070</span>@InterfaceStability.Evolving /*Evolving for a release,to be changed to Stable */<a name="line.70"></a>
+<span class="sourceLineNo">071</span>class ChRootedFileSystem extends FilterFileSystem {<a name="line.71"></a>
+<span class="sourceLineNo">072</span>  private final URI myUri; // the base URI + the chRoot<a name="line.72"></a>
+<span class="sourceLineNo">073</span>  private final Path chRootPathPart; // the root below the root of the base<a name="line.73"></a>
+<span class="sourceLineNo">074</span>  private final String chRootPathPartString;<a name="line.74"></a>
+<span class="sourceLineNo">075</span>  private Path workingDir;<a name="line.75"></a>
+<span class="sourceLineNo">076</span>  <a name="line.76"></a>
+<span class="sourceLineNo">077</span>  protected FileSystem getMyFs() {<a name="line.77"></a>
+<span class="sourceLineNo">078</span>    return getRawFileSystem();<a name="line.78"></a>
+<span class="sourceLineNo">079</span>  }<a name="line.79"></a>
+<span class="sourceLineNo">080</span>  <a name="line.80"></a>
+<span class="sourceLineNo">081</span>  /**<a name="line.81"></a>
+<span class="sourceLineNo">082</span>   * @param path<a name="line.82"></a>
+<span class="sourceLineNo">083</span>   * @return  full path including the chroot <a name="line.83"></a>
+<span class="sourceLineNo">084</span>   */<a name="line.84"></a>
+<span class="sourceLineNo">085</span>  protected Path fullPath(final Path path) {<a name="line.85"></a>
+<span class="sourceLineNo">086</span>    super.checkPath(path);<a name="line.86"></a>
+<span class="sourceLineNo">087</span>    return path.isAbsolute() ? <a name="line.87"></a>
+<span class="sourceLineNo">088</span>        new Path((chRootPathPart.isRoot() ? "" : chRootPathPartString)<a name="line.88"></a>
+<span class="sourceLineNo">089</span>            + path.toUri().getPath()) :<a name="line.89"></a>
+<span class="sourceLineNo">090</span>        new Path(chRootPathPartString + workingDir.toUri().getPath(), path);<a name="line.90"></a>
+<span class="sourceLineNo">091</span>  }<a name="line.91"></a>
+<span class="sourceLineNo">092</span>  <a name="line.92"></a>
+<span class="sourceLineNo">093</span>  /**<a name="line.93"></a>
+<span class="sourceLineNo">094</span>   * Constructor<a name="line.94"></a>
+<span class="sourceLineNo">095</span>   * @param uri base file system<a name="line.95"></a>
+<span class="sourceLineNo">096</span>   * @param conf configuration<a name="line.96"></a>
+<span class="sourceLineNo">097</span>   * @throws IOException <a name="line.97"></a>
+<span class="sourceLineNo">098</span>   */<a name="line.98"></a>
+<span class="sourceLineNo">099</span>  public ChRootedFileSystem(final URI uri, Configuration conf)<a name="line.99"></a>
+<span class="sourceLineNo">100</span>      throws IOException {<a name="line.100"></a>
+<span class="sourceLineNo">101</span>    super(FileSystem.get(uri, conf));<a name="line.101"></a>
+<span class="sourceLineNo">102</span>    String pathString = uri.getPath();<a name="line.102"></a>
+<span class="sourceLineNo">103</span>    if (pathString.isEmpty()) {<a name="line.103"></a>
+<span class="sourceLineNo">104</span>      pathString = "/";<a name="line.104"></a>
+<span class="sourceLineNo">105</span>    }<a name="line.105"></a>
+<span class="sourceLineNo">106</span>    chRootPathPart = new Path(pathString);<a name="line.106"></a>
+<span class="sourceLineNo">107</span>    chRootPathPartString = chRootPathPart.toUri().getPath();<a name="line.107"></a>
+<span class="sourceLineNo">108</span>    myUri = uri;<a name="line.108"></a>
+<span class="sourceLineNo">109</span>    workingDir = getHomeDirectory();<a name="line.109"></a>
+<span class="sourceLineNo">110</span>    // We don't use the wd of the myFs<a name="line.110"></a>
+<span class="sourceLineNo">111</span>  }<a name="line.111"></a>
+<span class="sourceLineNo">112</span>  <a name="line.112"></a>
+<span class="sourceLineNo">113</span>  /** <a name="line.113"></a>
+<span class="sourceLineNo">114</span>   * Called after a new FileSystem instance is constructed.<a name="line.114"></a>
+<span class="sourceLineNo">115</span>   * @param name a uri whose authority section names the host, port, etc.<a name="line.115"></a>
+<span class="sourceLineNo">116</span>   *   for this FileSystem<a name="line.116"></a>
+<span class="sourceLineNo">117</span>   * @param conf the configuration<a name="line.117"></a>
+<span class="sourceLineNo">118</span>   */<a name="line.118"></a>
+<span class="sourceLineNo">119</span>  @Override<a name="line.119"></a>
+<span class="sourceLineNo">120</span>  public void initialize(final URI name, final Configuration conf)<a name="line.120"></a>
+<span class="sourceLineNo">121</span>      throws IOException {<a name="line.121"></a>
+<span class="sourceLineNo">122</span>    super.initialize(name, conf);<a name="line.122"></a>
+<span class="sourceLineNo">123</span>    setConf(conf);<a name="line.123"></a>
+<span class="sourceLineNo">124</span>  }<a name="line.124"></a>
+<span class="sourceLineNo">125</span><a name="line.125"></a>
+<span class="sourceLineNo">126</span>  @Override<a name="line.126"></a>
+<span class="sourceLineNo">127</span>  public URI getUri() {<a name="line.127"></a>
+<span class="sourceLineNo">128</span>    return myUri;<a name="line.128"></a>
+<span class="sourceLineNo">129</span>  }<a name="line.129"></a>
+<span class="sourceLineNo">130</span>  <a name="line.130"></a>
+<span class="sourceLineNo">131</span>  /**<a name="line.131"></a>
+<span class="sourceLineNo">132</span>   * Strip out the root from the path.<a name="line.132"></a>
+<span class="sourceLineNo">133</span>   * @param p - fully qualified path p<a name="line.133"></a>
+<span class="sourceLineNo">134</span>   * @return -  the remaining path  without the begining /<a name="line.134"></a>
+<span class="sourceLineNo">135</span>   * @throws IOException if the p is not prefixed with root<a name="line.135"></a>
+<span class="sourceLineNo">136</span>   */<a name="line.136"></a>
+<span class="sourceLineNo">137</span>  String stripOutRoot(final Path p) throws IOException {<a name="line.137"></a>
+<span class="sourceLineNo">138</span>    try {<a name="line.138"></a>
+<span class="sourceLineNo">139</span>     checkPath(p);<a name="line.139"></a>
+<span class="sourceLineNo">140</span>    } catch (IllegalArgumentException e) {<a name="line.140"></a>
+<span class="sourceLineNo">141</span>      throw new IOException("Internal Error - path " + p +<a name="line.141"></a>
+<span class="sourceLineNo">142</span>          " should have been with URI: " + myUri);<a name="line.142"></a>
+<span class="sourceLineNo">143</span>    }<a name="line.143"></a>
+<span class="sourceLineNo">144</span>    String pathPart = p.toUri().getPath();<a name="line.144"></a>
+<span class="sourceLineNo">145</span>    return (pathPart.length() == chRootPathPartString.length()) ? "" : pathPart<a name="line.145"></a>
+<span class="sourceLineNo">146</span>        .substring(chRootPathPartString.length() + (chRootPathPart.isRoot() ? 0 : 1));<a name="line.146"></a>
+<span class="sourceLineNo">147</span>  }<a name="line.147"></a>
+<span class="sourceLineNo">148</span>  <a name="line.148"></a>
+<span class="sourceLineNo">149</span>  @Override<a name="line.149"></a>
+<span class="sourceLineNo">150</span>  protected Path getInitialWorkingDirectory() {<a name="line.150"></a>
+<span class="sourceLineNo">151</span>    /*<a name="line.151"></a>
+<span class="sourceLineNo">152</span>     * 3 choices here: <a name="line.152"></a>
+<span class="sourceLineNo">153</span>     *     null or / or /user/&lt;uname&gt; or strip out the root out of myFs's<a name="line.153"></a>
+<span class="sourceLineNo">154</span>     *  inital wd. <a name="line.154"></a>
+<span class="sourceLineNo">155</span>     * Only reasonable choice for initialWd for chrooted fds is null <a name="line.155"></a>
+<span class="sourceLineNo">156</span>     * so that the default rule for wd is applied<a name="line.156"></a>
+<span class="sourceLineNo">157</span>     */<a name="line.157"></a>
+<span class="sourceLineNo">158</span>    return null;<a name="line.158"></a>
+<span class="sourceLineNo">159</span>  }<a name="line.159"></a>
+<span class="sourceLineNo">160</span>  <a name="line.160"></a>
+<span class="sourceLineNo">161</span>  public Path getResolvedQualifiedPath(final Path f)<a name="line.161"></a>
+<span class="sourceLineNo">162</span>      throws FileNotFoundException {<a name="line.162"></a>
+<span class="sourceLineNo">163</span>    return makeQualified(<a name="line.163"></a>
+<span class="sourceLineNo">164</span>        new Path(chRootPathPartString + f.toUri().toString()));<a name="line.164"></a>
+<span class="sourceLineNo">165</span>  }<a name="line.165"></a>
+<span class="sourceLineNo">166</span><a name="line.166"></a>
+<span class="sourceLineNo">167</span>  @Override<a name="line.167"></a>
+<span class="sourceLineNo">168</span>  public Path getWorkingDirectory() {<a name="line.168"></a>
+<span class="sourceLineNo">169</span>    return workingDir;<a name="line.169"></a>
+<span class="sourceLineNo">170</span>  }<a name="line.170"></a>
+<span class="sourceLineNo">171</span>  <a name="line.171"></a>
+<span class="sourceLineNo">172</span>  @Override<a name="line.172"></a>
+<span class="sourceLineNo">173</span>  public void setWorkingDirectory(final Path new_dir) {<a name="line.173"></a>
+<span class="sourceLineNo">174</span>    workingDir = new_dir.isAbsolute() ? new_dir : new Path(workingDir, new_dir);<a name="line.174"></a>
+<span class="sourceLineNo">175</span>  }<a name="line.175"></a>
+<span class="sourceLineNo">176</span><a name="line.176"></a>
+<span class="sourceLineNo">177</span>  @Override<a name="line.177"></a>
+<span class="sourceLineNo">178</span>  public FSDataOutputStream create(final Path f, final FsPermission permission,<a name="line.178"></a>
+<span class="sourceLineNo">179</span>      final boolean overwrite, final int bufferSize, final short replication,<a name="line.179"></a>
+<span class="sourceLineNo">180</span>      final long blockSize, final Progressable progress) throws IOException {<a name="line.180"></a>
+<span class="sourceLineNo">181</span>    return super.create(fullPath(f), permission, overwrite, bufferSize,<a name="line.181"></a>
+<span class="sourceLineNo">182</span>        replication, blockSize, progress);<a name="line.182"></a>
+<span class="sourceLineNo">183</span>  }<a name="line.183"></a>
+<span class="sourceLineNo">184</span>  <a name="line.184"></a>
+<span class="sourceLineNo">185</span>  @Override<a name="line.185"></a>
+<span class="sourceLineNo">186</span>  @Deprecated<a name="line.186"></a>
+<span class="sourceLineNo">187</span>  public FSDataOutputStream createNonRecursive(Path f, FsPermission permission,<a name="line.187"></a>
+<span class="sourceLineNo">188</span>      EnumSet&lt;CreateFlag&gt; flags, int bufferSize, short replication, long blockSize,<a name="line.188"></a>
+<span class="sourceLineNo">189</span>      Progressable progress) throws IOException {<a name="line.189"></a>
+<span class="sourceLineNo">190</span>    <a name="line.190"></a>
+<span class="sourceLineNo">191</span>    return super.createNonRecursive(fullPath(f), permission, flags, bufferSize, replication, blockSize,<a name="line.191"></a>
+<span class="sourceLineNo">192</span>        progress);<a name="line.192"></a>
+<span class="sourceLineNo">193</span>  }<a name="line.193"></a>
+<span class="sourceLineNo">194</span><a name="line.194"></a>
+<span class="sourceLineNo">195</span>  @Override<a name="line.195"></a>
+<span class="sourceLineNo">196</span>  public boolean delete(final Path f, final boolean recursive) <a name="line.196"></a>
+<span class="sourceLineNo">197</span>      throws IOException {<a name="line.197"></a>
+<span class="sourceLineNo">198</span>    return super.delete(fullPath(f), recursive);<a name="line.198"></a>
+<span class="sourceLineNo">199</span>  }<a name="line.199"></a>
+<span class="sourceLineNo">200</span>  <a name="line.200"></a>
+<span class="sourceLineNo">201</span><a name="line.201"></a>
+<span class="sourceLineNo">202</span>  @Override<a name="line.202"></a>
+<span class="sourceLineNo">203</span>  @SuppressWarnings("deprecation")<a name="line.203"></a>
+<span class="sourceLineNo">204</span>  public boolean delete(Path f) throws IOException {<a name="line.204"></a>
+<span class="sourceLineNo">205</span>   return delete(f, true);<a name="line.205"></a>
+<span class="sourceLineNo">206</span>  }<a name="line.206"></a>
+<span class="sourceLineNo">207</span><a name="line.207"></a>
+<span class="sourceLineNo">208</span>  @Override<a name="line.208"></a>
+<span class="sourceLineNo">209</span>  public BlockLocation[] getFileBlockLocations(final FileStatus fs, final long start,<a name="line.209"></a>
+<span class="sourceLineNo">210</span>      final long len) throws IOException {<a name="line.210"></a>
+<span class="sourceLineNo">211</span>    return super.getFileBlockLocations(<a name="line.211"></a>
+<span class="sourceLineNo">212</span>        new ViewFsFileStatus(fs, fullPath(fs.getPath())), start, len);<a name="line.212"></a>
+<span class="sourceLineNo">213</span>  }<a name="line.213"></a>
+<span class="sourceLineNo">214</span><a name="line.214"></a>
+<span class="sourceLineNo">215</span>  @Override<a name="line.215"></a>
+<span class="sourceLineNo">216</span>  public FileChecksum getFileChecksum(final Path f) <a name="line.216"></a>
+<span class="sourceLineNo">217</span>      throws IOException {<a name="line.217"></a>
+<span class="sourceLineNo">218</span>    return super.getFileChecksum(fullPath(f));<a name="line.218"></a>
+<span class="sourceLineNo">219</span>  }<a name="line.219"></a>
+<span class="sourceLineNo">220</span><a name="line.220"></a>
+<span class="sourceLineNo">221</span>  @Override<a name="line.221"></a>
+<span class="sourceLineNo">222</span>  public FileStatus getFileStatus(final Path f) <a name="line.222"></a>
+<span class="sourceLineNo">223</span>      throws IOException {<a name="line.223"></a>
+<span class="sourceLineNo">224</span>    return super.getFileStatus(fullPath(f));<a name="line.224"></a>
+<span class="sourceLineNo">225</span>  }<a name="line.225"></a>
+<span class="sourceLineNo">226</span><a name="line.226"></a>
+<span class="sourceLineNo">227</span>  @Override<a name="line.227"></a>
+<span class="sourceLineNo">228</span>  public void access(Path path, FsAction mode) throws AccessControlException,<a name="line.228"></a>
+<span class="sourceLineNo">229</span>      FileNotFoundException, IOException {<a name="line.229"></a>
+<span class="sourceLineNo">230</span>    super.access(fullPath(path), mode);<a name="line.230"></a>
+<span class="sourceLineNo">231</span>  }<a name="line.231"></a>
+<span class="sourceLineNo">232</span><a name="line.232"></a>
+<span class="sourceLineNo">233</span>  @Override<a name="line.233"></a>
+<span class="sourceLineNo">234</span>  public FsStatus getStatus(Path p) throws IOException {<a name="line.234"></a>
+<span class="sourceLineNo">235</span>    return super.getStatus(fullPath(p));<a name="line.235"></a>
+<span class="sourceLineNo">236</span>  }<a name="line.236"></a>
+<span class="sourceLineNo">237</span><a name="line.237"></a>
+<span class="sourceLineNo">238</span>  @Override<a name="line.238"></a>
+<span class="sourceLineNo">239</span>  public FileStatus[] listStatus(final Path f) <a name="line.239"></a>
+<span class="sourceLineNo">240</span>      throws IOException {<a name="line.240"></a>
+<span class="sourceLineNo">241</span>    return super.listStatus(fullPath(f));<a name="line.241"></a>
+<span class="sourceLineNo">242</span>  }<a name="line.242"></a>
+<span class="sourceLineNo">243</span>  <a name="line.243"></a>
+<span class="sourceLineNo">244</span>  @Override<a name="line.244"></a>
+<span class="sourceLineNo">245</span>  public boolean mkdirs(final Path f, final FsPermission permission)<a name="line.245"></a>
+<span class="sourceLineNo">246</span>      throws IOException {<a name="line.246"></a>
+<span class="sourceLineNo">247</span>    return super.mkdirs(fullPath(f), permission);<a name="line.247"></a>
+<span class="sourceLineNo">248</span>  }<a name="line.248"></a>
+<span class="sourceLineNo">249</span><a name="line.249"></a>
+<span class="sourceLineNo">250</span>  @Override<a name="line.250"></a>
+<span class="sourceLineNo">251</span>  public FSDataInputStream open(final Path f, final int bufferSize) <a name="line.251"></a>
+<span class="sourceLineNo">252</span>    throws IOException {<a name="line.252"></a>
+<span class="sourceLineNo">253</span>    return super.open(fullPath(f), bufferSize);<a name="line.253"></a>
+<span class="sourceLineNo">254</span>  }<a name="line.254"></a>
+<span class="sourceLineNo">255</span>  <a name="line.255"></a>
+<span class="sourceLineNo">256</span>  @Override<a name="line.256"></a>
+<span class="sourceLineNo">257</span>  public FSDataOutputStream append(final Path f, final int bufferSize,<a name="line.257"></a>
+<span class="sourceLineNo">258</span>      final Progressable progress) throws IOException {<a name="line.258"></a>
+<span class="sourceLineNo">259</span>    return super.append(fullPath(f), bufferSize, progress);<a name="line.259"></a>
+<span class="sourceLineNo">260</span>  }<a name="line.260"></a>
+<span class="sourceLineNo">261</span><a name="line.261"></a>
+<span class="sourceLineNo">262</span>  @Override<a name="line.262"></a>
+<span class="sourceLineNo">263</span>  public boolean rename(final Path src, final Path dst) throws IOException {<a name="line.263"></a>
+<span class="sourceLineNo">264</span>    // note fullPath will check that paths are relative to this FileSystem.<a name="line.264"></a>
+<span class="sourceLineNo">265</span>    // Hence both are in same file system and a rename is valid<a name="line.265"></a>
+<span class="sourceLineNo">266</span>    return super.rename(fullPath(src), fullPath(dst)); <a name="line.266"></a>
+<span class="sourceLineNo">267</span>  }<a name="line.267"></a>
+<span class="sourceLineNo">268</span>  <a name="line.268"></a>
+<span class="sourceLineNo">269</span>  @Override<a name="line.269"></a>
+<span class="sourceLineNo">270</span>  public void setOwner(final Path f, final String username,<a name="line.270"></a>
+<span class="sourceLineNo">271</span>      final String groupname)<a name="line.271"></a>
+<span class="sourceLineNo">272</span>    throws IOException {<a name="line.272"></a>
+<span class="sourceLineNo">273</span>    super.setOwner(fullPath(f), username, groupname);<a name="line.273"></a>
+<span class="sourceLineNo">274</span>  }<a name="line.274"></a>
+<span class="sourceLineNo">275</span><a name="line.275"></a>
+<span class="sourceLineNo">276</span>  @Override<a name="line.276"></a>
+<span class="sourceLineNo">277</span>  public void setPermission(final Path f, final FsPermission permission)<a name="line.277"></a>
+<span class="sourceLineNo">278</span>    throws IOException {<a name="line.278"></a>
+<span class="sourceLineNo">279</span>    super.setPermission(fullPath(f), permission);<a name="line.279"></a>
+<span class="sourceLineNo">280</span>  }<a name="line.280"></a>
+<span class="sourceLineNo">281</span><a name="line.281"></a>
+<span class="sourceLineNo">282</span>  @Override<a name="line.282"></a>
+<span class="sourceLineNo">283</span>  public boolean setReplication(final Path f, final short replication)<a name="line.283"></a>
+<span class="sourceLineNo">284</span>    throws IOException {<a name="line.284"></a>
+<span class="sourceLineNo">285</span>    return super.setReplication(fullPath(f), replication);<a name="line.285"></a>
+<span class="sourceLineNo">286</span>  }<a name="line.286"></a>
+<span class="sourceLineNo">287</span><a name="line.287"></a>
+<span class="sourceLineNo">288</span>  @Override<a name="line.288"></a>
+<span class="sourceLineNo">289</span>  public void setTimes(final Path f, final long mtime, final long atime) <a name="line.289"></a>
+<span class="sourceLineNo">290</span>      throws IOException {<a name="line.290"></a>
+<span class="sourceLineNo">291</span>    super.setTimes(fullPath(f), mtime, atime);<a name="line.291"></a>
+<span class="sourceLineNo">292</span>  }<a name="line.292"></a>
+<span class="sourceLineNo">293</span><a name="line.293"></a>
+<span class="sourceLineNo">294</span>  @Override<a name="line.294"></a>
+<span class="sourceLineNo">295</span>  public void modifyAclEntries(Path path, List&lt;AclEntry&gt; aclSpec)<a name="line.295"></a>
+<span class="sourceLineNo">296</span>      throws IOException {<a name="line.296"></a>
+<span class="sourceLineNo">297</span>    super.modifyAclEntries(fullPath(path), aclSpec);<a name="line.297"></a>
+<span class="sourceLineNo">298</span>  }<a name="line.298"></a>
+<span class="sourceLineNo">299</span><a name="line.299"></a>
+<span class="sourceLineNo">300</span>  @Override<a name="line.300"></a>
+<span class="sourceLineNo">301</span>  public void removeAclEntries(Path path, List&lt;AclEntry&gt; aclSpec)<a name="line.301"></a>
+<span class="sourceLineNo">302</span>      throws IOException {<a name="line.302"></a>
+<span class="sourceLineNo">303</span>    super.removeAclEntries(fullPath(path), aclSpec);<a name="line.303"></a>
+<span class="sourceLineNo">304</span>  }<a name="line.304"></a>
+<span class="sourceLineNo">305</span><a name="line.305"></a>
+<span class="sourceLineNo">306</span>  @Override<a name="line.306"></a>
+<span class="sourceLineNo">307</span>  public void removeDefaultAcl(Path path) throws IOException {<a name="line.307"></a>
+<span class="sourceLineNo">308</span>    super.removeDefaultAcl(fullPath(path));<a name="line.308"></a>
+<span class="sourceLineNo">309</span>  }<a name="line.309"></a>
+<span class="sourceLineNo">310</span><a name="line.310"></a>
+<span class="sourceLineNo">311</span>  @Override<a name="line.311"></a>
+<span class="sourceLineNo">312</span>  public void removeAcl(Path path) throws IOException {<a name="line.312"></a>
+<span class="sourceLineNo">313</span>    super.removeAcl(fullPath(path));<a name="line.313"></a>
+<span class="sourceLineNo">314</span>  }<a name="line.314"></a>
+<span class="sourceLineNo">315</span><a name="line.315"></a>
+<span class="sourceLineNo">316</span>  @Override<a name="line.316"></a>
+<span class="sourceLineNo">317</span>  public void setAcl(Path path, List&lt;AclEntry&gt; aclSpec) throws IOException {<a name="line.317"></a>
+<span class="sourceLineNo">318</span>    super.setAcl(fullPath(path), aclSpec);<a name="line.318"></a>
+<span class="sourceLineNo">319</span>  }<a name="line.319"></a>
+<span class="sourceLineNo">320</span><a name="line.320"></a>
+<span class="sourceLineNo">321</span>  @Override<a name="line.321"></a>
+<span class="sourceLineNo">322</span>  public AclStatus getAclStatus(Path path) throws IOException {<a name="line.322"></a>
+<span class="sourceLineNo">323</span>    return super.getAclStatus(fullPath(path));<a name="line.323"></a>
+<span class="sourceLineNo">324</span>  }<a name="line.324"></a>
+<span class="sourceLineNo">325</span><a name="line.325"></a>
+<span class="sourceLineNo">326</span>  @Override<a name="line.326"></a>
+<span class="sourceLineNo">327</span>  public void setXAttr(Path path, String name, byte[] value,<a name="line.327"></a>
+<span class="sourceLineNo">328</span>      EnumSet&lt;XAttrSetFlag&gt; flag) throws IOException {<a name="line.328"></a>
+<span class="sourceLineNo">329</span>    super.setXAttr(fullPath(path), name, value, flag);<a name="line.329"></a>
+<span class="sourceLineNo">330</span>  }<a name="line.330"></a>
+<span class="sourceLineNo">331</span><a name="line.331"></a>
+<span class="sourceLineNo">332</span>  @Override<a name="line.332"></a>
+<span class="sourceLineNo">333</span>  public byte[] getXAttr(Path path, String name) throws IOException {<a name="line.333"></a>
+<span class="sourceLineNo">334</span>    return super.getXAttr(fullPath(path), name);<a name="line.334"></a>
+<span class="sourceLineNo">335</span>  }<a name="line.335"></a>
+<span class="sourceLineNo">336</span><a name="line.336"></a>
+<span class="sourceLineNo">337</span>  @Override<a name="line.337"></a>
+<span class="sourceLineNo">338</span>  public Map&lt;String, byte[]&gt; getXAttrs(Path path) throws IOException {<a name="line.338"></a>
+<span class="sourceLineNo">339</span>    return super.getXAttrs(fullPath(path));<a name="line.339"></a>
+<span class="sourceLineNo">340</span>  }<a name="line.340"></a>
+<span class="sourceLineNo">341</span><a name="line.341"></a>
+<span class="sourceLineNo">342</span>  @Override<a name="line.342"></a>
+<span class="sourceLineNo">343</span>  public Map&lt;String, byte[]&gt; getXAttrs(Path path, List&lt;String&gt; names)<a name="line.343"></a>
+<span class="sourceLineNo">344</span>      throws IOException {<a name="line.344"></a>
+<span class="sourceLineNo">345</span>    return super.getXAttrs(fullPath(path), names);<a name="line.345"></a>
+<span class="sourceLineNo">346</span>  }<a name="line.346"></a>
+<span class="sourceLineNo">347</span><a name="line.347"></a>
+<span class="sourceLineNo">348</span>  @Override<a name="line.348"></a>
+<span class="sourceLineNo">349</span>  public List&lt;String&gt; listXAttrs(Path path) throws IOException {<a name="line.349"></a>
+<span class="sourceLineNo">350</span>    return super.listXAttrs(fullPath(path));<a name="line.350"></a>
+<span class="sourceLineNo">351</span>  }<a name="line.351"></a>
+<span class="sourceLineNo">352</span><a name="line.352"></a>
+<span class="sourceLineNo">353</span>  @Override<a name="line.353"></a>
+<span class="sourceLineNo">354</span>  public void removeXAttr(Path path, String name) throws IOException {<a name="line.354"></a>
+<span class="sourceLineNo">355</span>    super.removeXAttr(fullPath(path), name);<a name="line.355"></a>
+<span class="sourceLineNo">356</span>  }<a name="line.356"></a>
+<span class="sourceLineNo">357</span><a name="line.357"></a>
+<span class="sourceLineNo">358</span>  @Override<a name="line.358"></a>
+<span class="sourceLineNo">359</span>  public Path resolvePath(final Path p) throws IOException {<a name="line.359"></a>
+<span class="sourceLineNo">360</span>    return super.resolvePath(fullPath(p));<a name="line.360"></a>
+<span class="sourceLineNo">361</span>  }<a name="line.361"></a>
+<span class="sourceLineNo">362</span><a name="line.362"></a>
+<span class="sourceLineNo">363</span>  @Override<a name="line.363"></a>
+<span class="sourceLineNo">364</span>  public ContentSummary getContentSummary(Path f) throws IOException {<a name="line.364"></a>
+<span class="sourceLineNo">365</span>    return fs.getContentSummary(fullPath(f));<a name="line.365"></a>
+<span class="sourceLineNo">366</span>  }<a name="line.366"></a>
+<span class="sourceLineNo">367</span>  <a name="line.367"></a>
+<span class="sourceLineNo">368</span><a name="line.368"></a>
+<span class="sourceLineNo">369</span>  private static Path rootPath = new Path(Path.SEPARATOR);<a name="line.369"></a>
+<span class="sourceLineNo">370</span><a name="line.370"></a>
+<span class="sourceLineNo">371</span>  @Override<a name="line.371"></a>
+<span class="sourceLineNo">372</span>  public long getDefaultBlockSize() {<a name="line.372"></a>
+<span class="sourceLineNo">373</span>    return getDefaultBlockSize(fullPath(rootPath));<a name="line.373"></a>
+<span class="sourceLineNo">374</span>  }<a name="line.374"></a>
+<span class="sourceLineNo">375</span>  <a name="line.375"></a>
+<span class="sourceLineNo">376</span>  @Override<a name="line.376"></a>
+<span class="sourceLineNo">377</span>  public long getDefaultBlockSize(Path f) {<a name="line.377"></a>
+<span class="sourceLineNo">378</span>    return super.getDefaultBlockSize(fullPath(f));<a name="line.378"></a>
+<span class="sourceLineNo">379</span>  }  <a name="line.379"></a>
+<span class="sourceLineNo">380</span><a name="line.380"></a>
+<span class="sourceLineNo">381</span>  @Override<a name="line.381"></a>
+<span class="sourceLineNo">382</span>  public short getDefaultReplication() {<a name="line.382"></a>
+<span class="sourceLineNo">383</span>    return getDefaultReplication(fullPath(rootPath));<a name="line.383"></a>
+<span class="sourceLineNo">384</span>  }<a name="line.384"></a>
+<span class="sourceLineNo">385</span><a name="line.385"></a>
+<span class="sourceLineNo">386</span>  @Override<a name="line.386"></a>
+<span class="sourceLineNo">387</span>  public short getDefaultReplication(Path f) {<a name="line.387"></a>
+<span class="sourceLineNo">388</span>    return super.getDefaultReplication(fullPath(f));<a name="line.388"></a>
+<span class="sourceLineNo">389</span>  }<a name="line.389"></a>
+<span class="sourceLineNo">390</span>  <a name="line.390"></a>
+<span class="sourceLineNo">391</span>  @Override<a name="line.391"></a>
+<span class="sourceLineNo">392</span>  public FsServerDefaults getServerDefaults() throws IOException {<a name="line.392"></a>
+<span class="sourceLineNo">393</span>    return getServerDefaults(fullPath(rootPath));<a name="line.393"></a>
+<span class="sourceLineNo">394</span>  }  <a name="line.394"></a>
+<span class="sourceLineNo">395</span><a name="line.395"></a>
+<span class="sourceLineNo">396</span>  @Override<a name="line.396"></a>
+<span class="sourceLineNo">397</span>  public FsServerDefaults getServerDefaults(Path f) throws IOException {<a name="line.397"></a>
+<span class="sourceLineNo">398</span>    return super.getServerDefaults(fullPath(f));<a name="line.398"></a>
+<span class="sourceLineNo">399</span>  }  <a name="line.399"></a>
+<span class="sourceLineNo">400</span>}<a name="line.400"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+</div>
+</body>
+</html>

@@ -1,0 +1,177 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html lang="en">
+<head>
+<title>Source code</title>
+<link rel="stylesheet" type="text/css" href="../../../../../../../stylesheet.css" title="Style">
+</head>
+<body>
+<div class="sourceContainer">
+<pre><span class="sourceLineNo">001</span>/*<a name="line.1"></a>
+<span class="sourceLineNo">002</span> *  Licensed to the Apache Software Foundation (ASF) under one or more<a name="line.2"></a>
+<span class="sourceLineNo">003</span> *  contributor license agreements.  See the NOTICE file distributed with<a name="line.3"></a>
+<span class="sourceLineNo">004</span> *  this work for additional information regarding copyright ownership.<a name="line.4"></a>
+<span class="sourceLineNo">005</span> *  The ASF licenses this file to You under the Apache License, Version 2.0<a name="line.5"></a>
+<span class="sourceLineNo">006</span> *  (the "License"); you may not use this file except in compliance with<a name="line.6"></a>
+<span class="sourceLineNo">007</span> *  the License.  You may obtain a copy of the License at<a name="line.7"></a>
+<span class="sourceLineNo">008</span> *<a name="line.8"></a>
+<span class="sourceLineNo">009</span> *      http://www.apache.org/licenses/LICENSE-2.0<a name="line.9"></a>
+<span class="sourceLineNo">010</span> *<a name="line.10"></a>
+<span class="sourceLineNo">011</span> *  Unless required by applicable law or agreed to in writing, software<a name="line.11"></a>
+<span class="sourceLineNo">012</span> *  distributed under the License is distributed on an "AS IS" BASIS,<a name="line.12"></a>
+<span class="sourceLineNo">013</span> *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.<a name="line.13"></a>
+<span class="sourceLineNo">014</span> *  See the License for the specific language governing permissions and<a name="line.14"></a>
+<span class="sourceLineNo">015</span> *  limitations under the License.<a name="line.15"></a>
+<span class="sourceLineNo">016</span> *<a name="line.16"></a>
+<span class="sourceLineNo">017</span> */<a name="line.17"></a>
+<span class="sourceLineNo">018</span><a name="line.18"></a>
+<span class="sourceLineNo">019</span>/*<a name="line.19"></a>
+<span class="sourceLineNo">020</span> * This package is based on the work done by Keiron Liddle, Aftex Software<a name="line.20"></a>
+<span class="sourceLineNo">021</span> * &lt;keiron@aftexsw.com&gt; to whom the Ant project is very grateful for his<a name="line.21"></a>
+<span class="sourceLineNo">022</span> * great code.<a name="line.22"></a>
+<span class="sourceLineNo">023</span> */<a name="line.23"></a>
+<span class="sourceLineNo">024</span><a name="line.24"></a>
+<span class="sourceLineNo">025</span>package org.apache.hadoop.io.compress.bzip2;<a name="line.25"></a>
+<span class="sourceLineNo">026</span><a name="line.26"></a>
+<span class="sourceLineNo">027</span>/**<a name="line.27"></a>
+<span class="sourceLineNo">028</span> * Base class for both the compress and decompress classes. Holds common arrays,<a name="line.28"></a>
+<span class="sourceLineNo">029</span> * and static data.<a name="line.29"></a>
+<span class="sourceLineNo">030</span> * &lt;p&gt;<a name="line.30"></a>
+<span class="sourceLineNo">031</span> * This interface is public for historical purposes. You should have no need to<a name="line.31"></a>
+<span class="sourceLineNo">032</span> * use it.<a name="line.32"></a>
+<span class="sourceLineNo">033</span> * &lt;/p&gt;<a name="line.33"></a>
+<span class="sourceLineNo">034</span> */<a name="line.34"></a>
+<span class="sourceLineNo">035</span>public interface BZip2Constants {<a name="line.35"></a>
+<span class="sourceLineNo">036</span><a name="line.36"></a>
+<span class="sourceLineNo">037</span>  int baseBlockSize = 100000;<a name="line.37"></a>
+<span class="sourceLineNo">038</span>  int MAX_ALPHA_SIZE = 258;<a name="line.38"></a>
+<span class="sourceLineNo">039</span>  int MAX_CODE_LEN = 23;<a name="line.39"></a>
+<span class="sourceLineNo">040</span>  int RUNA = 0;<a name="line.40"></a>
+<span class="sourceLineNo">041</span>  int RUNB = 1;<a name="line.41"></a>
+<span class="sourceLineNo">042</span>  int N_GROUPS = 6;<a name="line.42"></a>
+<span class="sourceLineNo">043</span>  int G_SIZE = 50;<a name="line.43"></a>
+<span class="sourceLineNo">044</span>  int N_ITERS = 4;<a name="line.44"></a>
+<span class="sourceLineNo">045</span>  int MAX_SELECTORS = (2 + (900000 / G_SIZE));<a name="line.45"></a>
+<span class="sourceLineNo">046</span>  int NUM_OVERSHOOT_BYTES = 20;<a name="line.46"></a>
+<span class="sourceLineNo">047</span>  /**<a name="line.47"></a>
+<span class="sourceLineNo">048</span>   * End of a BZip2 block<a name="line.48"></a>
+<span class="sourceLineNo">049</span>   */<a name="line.49"></a>
+<span class="sourceLineNo">050</span>  public static final int END_OF_BLOCK = -2;<a name="line.50"></a>
+<span class="sourceLineNo">051</span>  /**<a name="line.51"></a>
+<span class="sourceLineNo">052</span>   * End of BZip2 stream.<a name="line.52"></a>
+<span class="sourceLineNo">053</span>   */<a name="line.53"></a>
+<span class="sourceLineNo">054</span>  public static final int END_OF_STREAM = -1;<a name="line.54"></a>
+<span class="sourceLineNo">055</span><a name="line.55"></a>
+<span class="sourceLineNo">056</span>  /**<a name="line.56"></a>
+<span class="sourceLineNo">057</span>  * This array really shouldn't be here. Again, for historical purposes it<a name="line.57"></a>
+<span class="sourceLineNo">058</span>  * is.<a name="line.58"></a>
+<span class="sourceLineNo">059</span>  *<a name="line.59"></a>
+<span class="sourceLineNo">060</span>  * &lt;p&gt;<a name="line.60"></a>
+<span class="sourceLineNo">061</span>  * FIXME: This array should be in a private or package private location,<a name="line.61"></a>
+<span class="sourceLineNo">062</span>  * since it could be modified by malicious code.<a name="line.62"></a>
+<span class="sourceLineNo">063</span>  * &lt;/p&gt;<a name="line.63"></a>
+<span class="sourceLineNo">064</span>  */<a name="line.64"></a>
+<span class="sourceLineNo">065</span>  final int[] rNums = { 619, 720, 127, 481, 931, 816, 813, 233, 566, 247,<a name="line.65"></a>
+<span class="sourceLineNo">066</span>    985, 724, 205, 454, 863, 491, 741, 242, 949, 214, 733, 859, 335,<a name="line.66"></a>
+<span class="sourceLineNo">067</span>    708, 621, 574, 73, 654, 730, 472, 419, 436, 278, 496, 867, 210,<a name="line.67"></a>
+<span class="sourceLineNo">068</span>    399, 680, 480, 51, 878, 465, 811, 169, 869, 675, 611, 697, 867,<a name="line.68"></a>
+<span class="sourceLineNo">069</span>    561, 862, 687, 507, 283, 482, 129, 807, 591, 733, 623, 150, 238,<a name="line.69"></a>
+<span class="sourceLineNo">070</span>    59, 379, 684, 877, 625, 169, 643, 105, 170, 607, 520, 932, 727,<a name="line.70"></a>
+<span class="sourceLineNo">071</span>    476, 693, 425, 174, 647, 73, 122, 335, 530, 442, 853, 695, 249,<a name="line.71"></a>
+<span class="sourceLineNo">072</span>    445, 515, 909, 545, 703, 919, 874, 474, 882, 500, 594, 612, 641,<a name="line.72"></a>
+<span class="sourceLineNo">073</span>    801, 220, 162, 819, 984, 589, 513, 495, 799, 161, 604, 958, 533,<a name="line.73"></a>
+<span class="sourceLineNo">074</span>    221, 400, 386, 867, 600, 782, 382, 596, 414, 171, 516, 375, 682,<a name="line.74"></a>
+<span class="sourceLineNo">075</span>    485, 911, 276, 98, 553, 163, 354, 666, 933, 424, 341, 533, 870,<a name="line.75"></a>
+<span class="sourceLineNo">076</span>    227, 730, 475, 186, 263, 647, 537, 686, 600, 224, 469, 68, 770,<a name="line.76"></a>
+<span class="sourceLineNo">077</span>    919, 190, 373, 294, 822, 808, 206, 184, 943, 795, 384, 383, 461,<a name="line.77"></a>
+<span class="sourceLineNo">078</span>    404, 758, 839, 887, 715, 67, 618, 276, 204, 918, 873, 777, 604,<a name="line.78"></a>
+<span class="sourceLineNo">079</span>    560, 951, 160, 578, 722, 79, 804, 96, 409, 713, 940, 652, 934, 970,<a name="line.79"></a>
+<span class="sourceLineNo">080</span>    447, 318, 353, 859, 672, 112, 785, 645, 863, 803, 350, 139, 93,<a name="line.80"></a>
+<span class="sourceLineNo">081</span>    354, 99, 820, 908, 609, 772, 154, 274, 580, 184, 79, 626, 630, 742,<a name="line.81"></a>
+<span class="sourceLineNo">082</span>    653, 282, 762, 623, 680, 81, 927, 626, 789, 125, 411, 521, 938,<a name="line.82"></a>
+<span class="sourceLineNo">083</span>    300, 821, 78, 343, 175, 128, 250, 170, 774, 972, 275, 999, 639,<a name="line.83"></a>
+<span class="sourceLineNo">084</span>    495, 78, 352, 126, 857, 956, 358, 619, 580, 124, 737, 594, 701,<a name="line.84"></a>
+<span class="sourceLineNo">085</span>    612, 669, 112, 134, 694, 363, 992, 809, 743, 168, 974, 944, 375,<a name="line.85"></a>
+<span class="sourceLineNo">086</span>    748, 52, 600, 747, 642, 182, 862, 81, 344, 805, 988, 739, 511, 655,<a name="line.86"></a>
+<span class="sourceLineNo">087</span>    814, 334, 249, 515, 897, 955, 664, 981, 649, 113, 974, 459, 893,<a name="line.87"></a>
+<span class="sourceLineNo">088</span>    228, 433, 837, 553, 268, 926, 240, 102, 654, 459, 51, 686, 754,<a name="line.88"></a>
+<span class="sourceLineNo">089</span>    806, 760, 493, 403, 415, 394, 687, 700, 946, 670, 656, 610, 738,<a name="line.89"></a>
+<span class="sourceLineNo">090</span>    392, 760, 799, 887, 653, 978, 321, 576, 617, 626, 502, 894, 679,<a name="line.90"></a>
+<span class="sourceLineNo">091</span>    243, 440, 680, 879, 194, 572, 640, 724, 926, 56, 204, 700, 707,<a name="line.91"></a>
+<span class="sourceLineNo">092</span>    151, 457, 449, 797, 195, 791, 558, 945, 679, 297, 59, 87, 824, 713,<a name="line.92"></a>
+<span class="sourceLineNo">093</span>    663, 412, 693, 342, 606, 134, 108, 571, 364, 631, 212, 174, 643,<a name="line.93"></a>
+<span class="sourceLineNo">094</span>    304, 329, 343, 97, 430, 751, 497, 314, 983, 374, 822, 928, 140,<a name="line.94"></a>
+<span class="sourceLineNo">095</span>    206, 73, 263, 980, 736, 876, 478, 430, 305, 170, 514, 364, 692,<a name="line.95"></a>
+<span class="sourceLineNo">096</span>    829, 82, 855, 953, 676, 246, 369, 970, 294, 750, 807, 827, 150,<a name="line.96"></a>
+<span class="sourceLineNo">097</span>    790, 288, 923, 804, 378, 215, 828, 592, 281, 565, 555, 710, 82,<a name="line.97"></a>
+<span class="sourceLineNo">098</span>    896, 831, 547, 261, 524, 462, 293, 465, 502, 56, 661, 821, 976,<a name="line.98"></a>
+<span class="sourceLineNo">099</span>    991, 658, 869, 905, 758, 745, 193, 768, 550, 608, 933, 378, 286,<a name="line.99"></a>
+<span class="sourceLineNo">100</span>    215, 979, 792, 961, 61, 688, 793, 644, 986, 403, 106, 366, 905,<a name="line.100"></a>
+<span class="sourceLineNo">101</span>    644, 372, 567, 466, 434, 645, 210, 389, 550, 919, 135, 780, 773,<a name="line.101"></a>
+<span class="sourceLineNo">102</span>    635, 389, 707, 100, 626, 958, 165, 504, 920, 176, 193, 713, 857,<a name="line.102"></a>
+<span class="sourceLineNo">103</span>    265, 203, 50, 668, 108, 645, 990, 626, 197, 510, 357, 358, 850,<a name="line.103"></a>
+<span class="sourceLineNo">104</span>    858, 364, 936, 638 };<a name="line.104"></a>
+<span class="sourceLineNo">105</span>}<a name="line.105"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+</div>
+</body>
+</html>

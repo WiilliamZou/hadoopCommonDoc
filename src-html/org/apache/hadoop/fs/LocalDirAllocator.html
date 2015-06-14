@@ -1,0 +1,621 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html lang="en">
+<head>
+<title>Source code</title>
+<link rel="stylesheet" type="text/css" href="../../../../../stylesheet.css" title="Style">
+</head>
+<body>
+<div class="sourceContainer">
+<pre><span class="sourceLineNo">001</span>/**<a name="line.1"></a>
+<span class="sourceLineNo">002</span> * Licensed to the Apache Software Foundation (ASF) under one<a name="line.2"></a>
+<span class="sourceLineNo">003</span> * or more contributor license agreements.  See the NOTICE file<a name="line.3"></a>
+<span class="sourceLineNo">004</span> * distributed with this work for additional information<a name="line.4"></a>
+<span class="sourceLineNo">005</span> * regarding copyright ownership.  The ASF licenses this file<a name="line.5"></a>
+<span class="sourceLineNo">006</span> * to you under the Apache License, Version 2.0 (the<a name="line.6"></a>
+<span class="sourceLineNo">007</span> * "License"); you may not use this file except in compliance<a name="line.7"></a>
+<span class="sourceLineNo">008</span> * with the License.  You may obtain a copy of the License at<a name="line.8"></a>
+<span class="sourceLineNo">009</span> *<a name="line.9"></a>
+<span class="sourceLineNo">010</span> *     http://www.apache.org/licenses/LICENSE-2.0<a name="line.10"></a>
+<span class="sourceLineNo">011</span> *<a name="line.11"></a>
+<span class="sourceLineNo">012</span> * Unless required by applicable law or agreed to in writing, software<a name="line.12"></a>
+<span class="sourceLineNo">013</span> * distributed under the License is distributed on an "AS IS" BASIS,<a name="line.13"></a>
+<span class="sourceLineNo">014</span> * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.<a name="line.14"></a>
+<span class="sourceLineNo">015</span> * See the License for the specific language governing permissions and<a name="line.15"></a>
+<span class="sourceLineNo">016</span> * limitations under the License.<a name="line.16"></a>
+<span class="sourceLineNo">017</span> */<a name="line.17"></a>
+<span class="sourceLineNo">018</span><a name="line.18"></a>
+<span class="sourceLineNo">019</span>package org.apache.hadoop.fs;<a name="line.19"></a>
+<span class="sourceLineNo">020</span><a name="line.20"></a>
+<span class="sourceLineNo">021</span>import java.io.*;<a name="line.21"></a>
+<span class="sourceLineNo">022</span>import java.util.*;<a name="line.22"></a>
+<span class="sourceLineNo">023</span><a name="line.23"></a>
+<span class="sourceLineNo">024</span>import org.apache.commons.logging.*;<a name="line.24"></a>
+<span class="sourceLineNo">025</span><a name="line.25"></a>
+<span class="sourceLineNo">026</span>import org.apache.hadoop.util.*;<a name="line.26"></a>
+<span class="sourceLineNo">027</span>import org.apache.hadoop.fs.FileSystem;<a name="line.27"></a>
+<span class="sourceLineNo">028</span>import org.apache.hadoop.fs.Path;<a name="line.28"></a>
+<span class="sourceLineNo">029</span>import org.apache.hadoop.util.DiskChecker.DiskErrorException;<a name="line.29"></a>
+<span class="sourceLineNo">030</span>import org.apache.hadoop.classification.InterfaceAudience;<a name="line.30"></a>
+<span class="sourceLineNo">031</span>import org.apache.hadoop.classification.InterfaceStability;<a name="line.31"></a>
+<span class="sourceLineNo">032</span>import org.apache.hadoop.conf.Configuration; <a name="line.32"></a>
+<span class="sourceLineNo">033</span><a name="line.33"></a>
+<span class="sourceLineNo">034</span>/** An implementation of a round-robin scheme for disk allocation for creating<a name="line.34"></a>
+<span class="sourceLineNo">035</span> * files. The way it works is that it is kept track what disk was last<a name="line.35"></a>
+<span class="sourceLineNo">036</span> * allocated for a file write. For the current request, the next disk from<a name="line.36"></a>
+<span class="sourceLineNo">037</span> * the set of disks would be allocated if the free space on the disk is <a name="line.37"></a>
+<span class="sourceLineNo">038</span> * sufficient enough to accommodate the file that is being considered for<a name="line.38"></a>
+<span class="sourceLineNo">039</span> * creation. If the space requirements cannot be met, the next disk in order<a name="line.39"></a>
+<span class="sourceLineNo">040</span> * would be tried and so on till a disk is found with sufficient capacity.<a name="line.40"></a>
+<span class="sourceLineNo">041</span> * Once a disk with sufficient space is identified, a check is done to make<a name="line.41"></a>
+<span class="sourceLineNo">042</span> * sure that the disk is writable. Also, there is an API provided that doesn't<a name="line.42"></a>
+<span class="sourceLineNo">043</span> * take the space requirements into consideration but just checks whether the<a name="line.43"></a>
+<span class="sourceLineNo">044</span> * disk under consideration is writable (this should be used for cases where<a name="line.44"></a>
+<span class="sourceLineNo">045</span> * the file size is not known apriori). An API is provided to read a path that<a name="line.45"></a>
+<span class="sourceLineNo">046</span> * was created earlier. That API works by doing a scan of all the disks for the<a name="line.46"></a>
+<span class="sourceLineNo">047</span> * input pathname.<a name="line.47"></a>
+<span class="sourceLineNo">048</span> * This implementation also provides the functionality of having multiple <a name="line.48"></a>
+<span class="sourceLineNo">049</span> * allocators per JVM (one for each unique functionality or context, like <a name="line.49"></a>
+<span class="sourceLineNo">050</span> * mapred, dfs-client, etc.). It ensures that there is only one instance of<a name="line.50"></a>
+<span class="sourceLineNo">051</span> * an allocator per context per JVM.<a name="line.51"></a>
+<span class="sourceLineNo">052</span> * Note:<a name="line.52"></a>
+<span class="sourceLineNo">053</span> * 1. The contexts referred above are actually the configuration items defined<a name="line.53"></a>
+<span class="sourceLineNo">054</span> * in the Configuration class like "mapred.local.dir" (for which we want to <a name="line.54"></a>
+<span class="sourceLineNo">055</span> * control the dir allocations). The context-strings are exactly those <a name="line.55"></a>
+<span class="sourceLineNo">056</span> * configuration items.<a name="line.56"></a>
+<span class="sourceLineNo">057</span> * 2. This implementation does not take into consideration cases where<a name="line.57"></a>
+<span class="sourceLineNo">058</span> * a disk becomes read-only or goes out of space while a file is being written<a name="line.58"></a>
+<span class="sourceLineNo">059</span> * to (disks are shared between multiple processes, and so the latter situation<a name="line.59"></a>
+<span class="sourceLineNo">060</span> * is probable).<a name="line.60"></a>
+<span class="sourceLineNo">061</span> * 3. In the class implementation, "Disk" is referred to as "Dir", which<a name="line.61"></a>
+<span class="sourceLineNo">062</span> * actually points to the configured directory on the Disk which will be the<a name="line.62"></a>
+<span class="sourceLineNo">063</span> * parent for all file write/read allocations.<a name="line.63"></a>
+<span class="sourceLineNo">064</span> */<a name="line.64"></a>
+<span class="sourceLineNo">065</span>@InterfaceAudience.LimitedPrivate({"HDFS", "MapReduce"})<a name="line.65"></a>
+<span class="sourceLineNo">066</span>@InterfaceStability.Unstable<a name="line.66"></a>
+<span class="sourceLineNo">067</span>public class LocalDirAllocator {<a name="line.67"></a>
+<span class="sourceLineNo">068</span>  <a name="line.68"></a>
+<span class="sourceLineNo">069</span>  //A Map from the config item names like "mapred.local.dir"<a name="line.69"></a>
+<span class="sourceLineNo">070</span>  //to the instance of the AllocatorPerContext. This<a name="line.70"></a>
+<span class="sourceLineNo">071</span>  //is a static object to make sure there exists exactly one instance per JVM<a name="line.71"></a>
+<span class="sourceLineNo">072</span>  private static Map &lt;String, AllocatorPerContext&gt; contexts = <a name="line.72"></a>
+<span class="sourceLineNo">073</span>                 new TreeMap&lt;String, AllocatorPerContext&gt;();<a name="line.73"></a>
+<span class="sourceLineNo">074</span>  private String contextCfgItemName;<a name="line.74"></a>
+<span class="sourceLineNo">075</span><a name="line.75"></a>
+<span class="sourceLineNo">076</span>  /** Used when size of file to be allocated is unknown. */<a name="line.76"></a>
+<span class="sourceLineNo">077</span>  public static final int SIZE_UNKNOWN = -1;<a name="line.77"></a>
+<span class="sourceLineNo">078</span><a name="line.78"></a>
+<span class="sourceLineNo">079</span>  /**Create an allocator object<a name="line.79"></a>
+<span class="sourceLineNo">080</span>   * @param contextCfgItemName<a name="line.80"></a>
+<span class="sourceLineNo">081</span>   */<a name="line.81"></a>
+<span class="sourceLineNo">082</span>  public LocalDirAllocator(String contextCfgItemName) {<a name="line.82"></a>
+<span class="sourceLineNo">083</span>    this.contextCfgItemName = contextCfgItemName;<a name="line.83"></a>
+<span class="sourceLineNo">084</span>  }<a name="line.84"></a>
+<span class="sourceLineNo">085</span>  <a name="line.85"></a>
+<span class="sourceLineNo">086</span>  /** This method must be used to obtain the dir allocation context for a <a name="line.86"></a>
+<span class="sourceLineNo">087</span>   * particular value of the context name. The context name must be an item<a name="line.87"></a>
+<span class="sourceLineNo">088</span>   * defined in the Configuration object for which we want to control the <a name="line.88"></a>
+<span class="sourceLineNo">089</span>   * dir allocations (e.g., &lt;code&gt;mapred.local.dir&lt;/code&gt;). The method will<a name="line.89"></a>
+<span class="sourceLineNo">090</span>   * create a context for that name if it doesn't already exist.<a name="line.90"></a>
+<span class="sourceLineNo">091</span>   */<a name="line.91"></a>
+<span class="sourceLineNo">092</span>  private AllocatorPerContext obtainContext(String contextCfgItemName) {<a name="line.92"></a>
+<span class="sourceLineNo">093</span>    synchronized (contexts) {<a name="line.93"></a>
+<span class="sourceLineNo">094</span>      AllocatorPerContext l = contexts.get(contextCfgItemName);<a name="line.94"></a>
+<span class="sourceLineNo">095</span>      if (l == null) {<a name="line.95"></a>
+<span class="sourceLineNo">096</span>        contexts.put(contextCfgItemName, <a name="line.96"></a>
+<span class="sourceLineNo">097</span>                    (l = new AllocatorPerContext(contextCfgItemName)));<a name="line.97"></a>
+<span class="sourceLineNo">098</span>      }<a name="line.98"></a>
+<span class="sourceLineNo">099</span>      return l;<a name="line.99"></a>
+<span class="sourceLineNo">100</span>    }<a name="line.100"></a>
+<span class="sourceLineNo">101</span>  }<a name="line.101"></a>
+<span class="sourceLineNo">102</span>  <a name="line.102"></a>
+<span class="sourceLineNo">103</span>  /** Get a path from the local FS. This method should be used if the size of <a name="line.103"></a>
+<span class="sourceLineNo">104</span>   *  the file is not known apriori. We go round-robin over the set of disks<a name="line.104"></a>
+<span class="sourceLineNo">105</span>   *  (via the configured dirs) and return the first complete path where<a name="line.105"></a>
+<span class="sourceLineNo">106</span>   *  we could create the parent directory of the passed path. <a name="line.106"></a>
+<span class="sourceLineNo">107</span>   *  @param pathStr the requested path (this will be created on the first <a name="line.107"></a>
+<span class="sourceLineNo">108</span>   *  available disk)<a name="line.108"></a>
+<span class="sourceLineNo">109</span>   *  @param conf the Configuration object<a name="line.109"></a>
+<span class="sourceLineNo">110</span>   *  @return the complete path to the file on a local disk<a name="line.110"></a>
+<span class="sourceLineNo">111</span>   *  @throws IOException<a name="line.111"></a>
+<span class="sourceLineNo">112</span>   */<a name="line.112"></a>
+<span class="sourceLineNo">113</span>  public Path getLocalPathForWrite(String pathStr, <a name="line.113"></a>
+<span class="sourceLineNo">114</span>      Configuration conf) throws IOException {<a name="line.114"></a>
+<span class="sourceLineNo">115</span>    return getLocalPathForWrite(pathStr, SIZE_UNKNOWN, conf);<a name="line.115"></a>
+<span class="sourceLineNo">116</span>  }<a name="line.116"></a>
+<span class="sourceLineNo">117</span>  <a name="line.117"></a>
+<span class="sourceLineNo">118</span>  /** Get a path from the local FS. Pass size as <a name="line.118"></a>
+<span class="sourceLineNo">119</span>   *  SIZE_UNKNOWN if not known apriori. We<a name="line.119"></a>
+<span class="sourceLineNo">120</span>   *  round-robin over the set of disks (via the configured dirs) and return<a name="line.120"></a>
+<span class="sourceLineNo">121</span>   *  the first complete path which has enough space <a name="line.121"></a>
+<span class="sourceLineNo">122</span>   *  @param pathStr the requested path (this will be created on the first <a name="line.122"></a>
+<span class="sourceLineNo">123</span>   *  available disk)<a name="line.123"></a>
+<span class="sourceLineNo">124</span>   *  @param size the size of the file that is going to be written<a name="line.124"></a>
+<span class="sourceLineNo">125</span>   *  @param conf the Configuration object<a name="line.125"></a>
+<span class="sourceLineNo">126</span>   *  @return the complete path to the file on a local disk<a name="line.126"></a>
+<span class="sourceLineNo">127</span>   *  @throws IOException<a name="line.127"></a>
+<span class="sourceLineNo">128</span>   */<a name="line.128"></a>
+<span class="sourceLineNo">129</span>  public Path getLocalPathForWrite(String pathStr, long size, <a name="line.129"></a>
+<span class="sourceLineNo">130</span>      Configuration conf) throws IOException {<a name="line.130"></a>
+<span class="sourceLineNo">131</span>    return getLocalPathForWrite(pathStr, size, conf, true);<a name="line.131"></a>
+<span class="sourceLineNo">132</span>  }<a name="line.132"></a>
+<span class="sourceLineNo">133</span>  <a name="line.133"></a>
+<span class="sourceLineNo">134</span>  /** Get a path from the local FS. Pass size as <a name="line.134"></a>
+<span class="sourceLineNo">135</span>   *  SIZE_UNKNOWN if not known apriori. We<a name="line.135"></a>
+<span class="sourceLineNo">136</span>   *  round-robin over the set of disks (via the configured dirs) and return<a name="line.136"></a>
+<span class="sourceLineNo">137</span>   *  the first complete path which has enough space <a name="line.137"></a>
+<span class="sourceLineNo">138</span>   *  @param pathStr the requested path (this will be created on the first <a name="line.138"></a>
+<span class="sourceLineNo">139</span>   *  available disk)<a name="line.139"></a>
+<span class="sourceLineNo">140</span>   *  @param size the size of the file that is going to be written<a name="line.140"></a>
+<span class="sourceLineNo">141</span>   *  @param conf the Configuration object<a name="line.141"></a>
+<span class="sourceLineNo">142</span>   *  @param checkWrite ensure that the path is writable<a name="line.142"></a>
+<span class="sourceLineNo">143</span>   *  @return the complete path to the file on a local disk<a name="line.143"></a>
+<span class="sourceLineNo">144</span>   *  @throws IOException<a name="line.144"></a>
+<span class="sourceLineNo">145</span>   */<a name="line.145"></a>
+<span class="sourceLineNo">146</span>  public Path getLocalPathForWrite(String pathStr, long size, <a name="line.146"></a>
+<span class="sourceLineNo">147</span>                                   Configuration conf,<a name="line.147"></a>
+<span class="sourceLineNo">148</span>                                   boolean checkWrite) throws IOException {<a name="line.148"></a>
+<span class="sourceLineNo">149</span>    AllocatorPerContext context = obtainContext(contextCfgItemName);<a name="line.149"></a>
+<span class="sourceLineNo">150</span>    return context.getLocalPathForWrite(pathStr, size, conf, checkWrite);<a name="line.150"></a>
+<span class="sourceLineNo">151</span>  }<a name="line.151"></a>
+<span class="sourceLineNo">152</span>  <a name="line.152"></a>
+<span class="sourceLineNo">153</span>  /** Get a path from the local FS for reading. We search through all the<a name="line.153"></a>
+<span class="sourceLineNo">154</span>   *  configured dirs for the file's existence and return the complete<a name="line.154"></a>
+<span class="sourceLineNo">155</span>   *  path to the file when we find one <a name="line.155"></a>
+<span class="sourceLineNo">156</span>   *  @param pathStr the requested file (this will be searched)<a name="line.156"></a>
+<span class="sourceLineNo">157</span>   *  @param conf the Configuration object<a name="line.157"></a>
+<span class="sourceLineNo">158</span>   *  @return the complete path to the file on a local disk<a name="line.158"></a>
+<span class="sourceLineNo">159</span>   *  @throws IOException<a name="line.159"></a>
+<span class="sourceLineNo">160</span>   */<a name="line.160"></a>
+<span class="sourceLineNo">161</span>  public Path getLocalPathToRead(String pathStr, <a name="line.161"></a>
+<span class="sourceLineNo">162</span>      Configuration conf) throws IOException {<a name="line.162"></a>
+<span class="sourceLineNo">163</span>    AllocatorPerContext context = obtainContext(contextCfgItemName);<a name="line.163"></a>
+<span class="sourceLineNo">164</span>    return context.getLocalPathToRead(pathStr, conf);<a name="line.164"></a>
+<span class="sourceLineNo">165</span>  }<a name="line.165"></a>
+<span class="sourceLineNo">166</span>  <a name="line.166"></a>
+<span class="sourceLineNo">167</span>  /**<a name="line.167"></a>
+<span class="sourceLineNo">168</span>   * Get all of the paths that currently exist in the working directories.<a name="line.168"></a>
+<span class="sourceLineNo">169</span>   * @param pathStr the path underneath the roots<a name="line.169"></a>
+<span class="sourceLineNo">170</span>   * @param conf the configuration to look up the roots in<a name="line.170"></a>
+<span class="sourceLineNo">171</span>   * @return all of the paths that exist under any of the roots<a name="line.171"></a>
+<span class="sourceLineNo">172</span>   * @throws IOException<a name="line.172"></a>
+<span class="sourceLineNo">173</span>   */<a name="line.173"></a>
+<span class="sourceLineNo">174</span>  public Iterable&lt;Path&gt; getAllLocalPathsToRead(String pathStr, <a name="line.174"></a>
+<span class="sourceLineNo">175</span>                                               Configuration conf<a name="line.175"></a>
+<span class="sourceLineNo">176</span>                                               ) throws IOException {<a name="line.176"></a>
+<span class="sourceLineNo">177</span>    AllocatorPerContext context;<a name="line.177"></a>
+<span class="sourceLineNo">178</span>    synchronized (this) {<a name="line.178"></a>
+<span class="sourceLineNo">179</span>      context = obtainContext(contextCfgItemName);<a name="line.179"></a>
+<span class="sourceLineNo">180</span>    }<a name="line.180"></a>
+<span class="sourceLineNo">181</span>    return context.getAllLocalPathsToRead(pathStr, conf);    <a name="line.181"></a>
+<span class="sourceLineNo">182</span>  }<a name="line.182"></a>
+<span class="sourceLineNo">183</span><a name="line.183"></a>
+<span class="sourceLineNo">184</span>  /** Creates a temporary file in the local FS. Pass size as -1 if not known <a name="line.184"></a>
+<span class="sourceLineNo">185</span>   *  apriori. We round-robin over the set of disks (via the configured dirs) <a name="line.185"></a>
+<span class="sourceLineNo">186</span>   *  and select the first complete path which has enough space. A file is<a name="line.186"></a>
+<span class="sourceLineNo">187</span>   *  created on this directory. The file is guaranteed to go away when the<a name="line.187"></a>
+<span class="sourceLineNo">188</span>   *  JVM exits.<a name="line.188"></a>
+<span class="sourceLineNo">189</span>   *  @param pathStr prefix for the temporary file<a name="line.189"></a>
+<span class="sourceLineNo">190</span>   *  @param size the size of the file that is going to be written<a name="line.190"></a>
+<span class="sourceLineNo">191</span>   *  @param conf the Configuration object<a name="line.191"></a>
+<span class="sourceLineNo">192</span>   *  @return a unique temporary file<a name="line.192"></a>
+<span class="sourceLineNo">193</span>   *  @throws IOException<a name="line.193"></a>
+<span class="sourceLineNo">194</span>   */<a name="line.194"></a>
+<span class="sourceLineNo">195</span>  public File createTmpFileForWrite(String pathStr, long size, <a name="line.195"></a>
+<span class="sourceLineNo">196</span>      Configuration conf) throws IOException {<a name="line.196"></a>
+<span class="sourceLineNo">197</span>    AllocatorPerContext context = obtainContext(contextCfgItemName);<a name="line.197"></a>
+<span class="sourceLineNo">198</span>    return context.createTmpFileForWrite(pathStr, size, conf);<a name="line.198"></a>
+<span class="sourceLineNo">199</span>  }<a name="line.199"></a>
+<span class="sourceLineNo">200</span>  <a name="line.200"></a>
+<span class="sourceLineNo">201</span>  /** Method to check whether a context is valid<a name="line.201"></a>
+<span class="sourceLineNo">202</span>   * @param contextCfgItemName<a name="line.202"></a>
+<span class="sourceLineNo">203</span>   * @return true/false<a name="line.203"></a>
+<span class="sourceLineNo">204</span>   */<a name="line.204"></a>
+<span class="sourceLineNo">205</span>  public static boolean isContextValid(String contextCfgItemName) {<a name="line.205"></a>
+<span class="sourceLineNo">206</span>    synchronized (contexts) {<a name="line.206"></a>
+<span class="sourceLineNo">207</span>      return contexts.containsKey(contextCfgItemName);<a name="line.207"></a>
+<span class="sourceLineNo">208</span>    }<a name="line.208"></a>
+<span class="sourceLineNo">209</span>  }<a name="line.209"></a>
+<span class="sourceLineNo">210</span>  <a name="line.210"></a>
+<span class="sourceLineNo">211</span>  /**<a name="line.211"></a>
+<span class="sourceLineNo">212</span>   * Removes the context from the context config items<a name="line.212"></a>
+<span class="sourceLineNo">213</span>   * <a name="line.213"></a>
+<span class="sourceLineNo">214</span>   * @param contextCfgItemName<a name="line.214"></a>
+<span class="sourceLineNo">215</span>   */<a name="line.215"></a>
+<span class="sourceLineNo">216</span>  @Deprecated<a name="line.216"></a>
+<span class="sourceLineNo">217</span>  @InterfaceAudience.LimitedPrivate({"MapReduce"})<a name="line.217"></a>
+<span class="sourceLineNo">218</span>  public static void removeContext(String contextCfgItemName) {<a name="line.218"></a>
+<span class="sourceLineNo">219</span>    synchronized (contexts) {<a name="line.219"></a>
+<span class="sourceLineNo">220</span>      contexts.remove(contextCfgItemName);<a name="line.220"></a>
+<span class="sourceLineNo">221</span>    }<a name="line.221"></a>
+<span class="sourceLineNo">222</span>  }<a name="line.222"></a>
+<span class="sourceLineNo">223</span>    <a name="line.223"></a>
+<span class="sourceLineNo">224</span>  /** We search through all the configured dirs for the file's existence<a name="line.224"></a>
+<span class="sourceLineNo">225</span>   *  and return true when we find  <a name="line.225"></a>
+<span class="sourceLineNo">226</span>   *  @param pathStr the requested file (this will be searched)<a name="line.226"></a>
+<span class="sourceLineNo">227</span>   *  @param conf the Configuration object<a name="line.227"></a>
+<span class="sourceLineNo">228</span>   *  @return true if files exist. false otherwise<a name="line.228"></a>
+<span class="sourceLineNo">229</span>   *  @throws IOException<a name="line.229"></a>
+<span class="sourceLineNo">230</span>   */<a name="line.230"></a>
+<span class="sourceLineNo">231</span>  public boolean ifExists(String pathStr,Configuration conf) {<a name="line.231"></a>
+<span class="sourceLineNo">232</span>    AllocatorPerContext context = obtainContext(contextCfgItemName);<a name="line.232"></a>
+<span class="sourceLineNo">233</span>    return context.ifExists(pathStr, conf);<a name="line.233"></a>
+<span class="sourceLineNo">234</span>  }<a name="line.234"></a>
+<span class="sourceLineNo">235</span><a name="line.235"></a>
+<span class="sourceLineNo">236</span>  /**<a name="line.236"></a>
+<span class="sourceLineNo">237</span>   * Get the current directory index for the given configuration item.<a name="line.237"></a>
+<span class="sourceLineNo">238</span>   * @return the current directory index for the given configuration item.<a name="line.238"></a>
+<span class="sourceLineNo">239</span>   */<a name="line.239"></a>
+<span class="sourceLineNo">240</span>  int getCurrentDirectoryIndex() {<a name="line.240"></a>
+<span class="sourceLineNo">241</span>    AllocatorPerContext context = obtainContext(contextCfgItemName);<a name="line.241"></a>
+<span class="sourceLineNo">242</span>    return context.getCurrentDirectoryIndex();<a name="line.242"></a>
+<span class="sourceLineNo">243</span>  }<a name="line.243"></a>
+<span class="sourceLineNo">244</span>  <a name="line.244"></a>
+<span class="sourceLineNo">245</span>  private static class AllocatorPerContext {<a name="line.245"></a>
+<span class="sourceLineNo">246</span><a name="line.246"></a>
+<span class="sourceLineNo">247</span>    private final Log LOG =<a name="line.247"></a>
+<span class="sourceLineNo">248</span>      LogFactory.getLog(AllocatorPerContext.class);<a name="line.248"></a>
+<span class="sourceLineNo">249</span><a name="line.249"></a>
+<span class="sourceLineNo">250</span>    private int dirNumLastAccessed;<a name="line.250"></a>
+<span class="sourceLineNo">251</span>    private Random dirIndexRandomizer = new Random();<a name="line.251"></a>
+<span class="sourceLineNo">252</span>    private FileSystem localFS;<a name="line.252"></a>
+<span class="sourceLineNo">253</span>    private DF[] dirDF;<a name="line.253"></a>
+<span class="sourceLineNo">254</span>    private String contextCfgItemName;<a name="line.254"></a>
+<span class="sourceLineNo">255</span>    private String[] localDirs;<a name="line.255"></a>
+<span class="sourceLineNo">256</span>    private String savedLocalDirs = "";<a name="line.256"></a>
+<span class="sourceLineNo">257</span><a name="line.257"></a>
+<span class="sourceLineNo">258</span>    public AllocatorPerContext(String contextCfgItemName) {<a name="line.258"></a>
+<span class="sourceLineNo">259</span>      this.contextCfgItemName = contextCfgItemName;<a name="line.259"></a>
+<span class="sourceLineNo">260</span>    }<a name="line.260"></a>
+<span class="sourceLineNo">261</span><a name="line.261"></a>
+<span class="sourceLineNo">262</span>    /** This method gets called everytime before any read/write to make sure<a name="line.262"></a>
+<span class="sourceLineNo">263</span>     * that any change to localDirs is reflected immediately.<a name="line.263"></a>
+<span class="sourceLineNo">264</span>     */<a name="line.264"></a>
+<span class="sourceLineNo">265</span>    private synchronized void confChanged(Configuration conf) <a name="line.265"></a>
+<span class="sourceLineNo">266</span>        throws IOException {<a name="line.266"></a>
+<span class="sourceLineNo">267</span>      String newLocalDirs = conf.get(contextCfgItemName);<a name="line.267"></a>
+<span class="sourceLineNo">268</span>      if (!newLocalDirs.equals(savedLocalDirs)) {<a name="line.268"></a>
+<span class="sourceLineNo">269</span>        localDirs = StringUtils.getTrimmedStrings(newLocalDirs);<a name="line.269"></a>
+<span class="sourceLineNo">270</span>        localFS = FileSystem.getLocal(conf);<a name="line.270"></a>
+<span class="sourceLineNo">271</span>        int numDirs = localDirs.length;<a name="line.271"></a>
+<span class="sourceLineNo">272</span>        ArrayList&lt;String&gt; dirs = new ArrayList&lt;String&gt;(numDirs);<a name="line.272"></a>
+<span class="sourceLineNo">273</span>        ArrayList&lt;DF&gt; dfList = new ArrayList&lt;DF&gt;(numDirs);<a name="line.273"></a>
+<span class="sourceLineNo">274</span>        for (int i = 0; i &lt; numDirs; i++) {<a name="line.274"></a>
+<span class="sourceLineNo">275</span>          try {<a name="line.275"></a>
+<span class="sourceLineNo">276</span>            // filter problematic directories<a name="line.276"></a>
+<span class="sourceLineNo">277</span>            Path tmpDir = new Path(localDirs[i]);<a name="line.277"></a>
+<span class="sourceLineNo">278</span>            if(localFS.mkdirs(tmpDir)|| localFS.exists(tmpDir)) {<a name="line.278"></a>
+<span class="sourceLineNo">279</span>              try {<a name="line.279"></a>
+<span class="sourceLineNo">280</span><a name="line.280"></a>
+<span class="sourceLineNo">281</span>                File tmpFile = tmpDir.isAbsolute()<a name="line.281"></a>
+<span class="sourceLineNo">282</span>                  ? new File(localFS.makeQualified(tmpDir).toUri())<a name="line.282"></a>
+<span class="sourceLineNo">283</span>                  : new File(localDirs[i]);<a name="line.283"></a>
+<span class="sourceLineNo">284</span><a name="line.284"></a>
+<span class="sourceLineNo">285</span>                DiskChecker.checkDir(tmpFile);<a name="line.285"></a>
+<span class="sourceLineNo">286</span>                dirs.add(tmpFile.getPath());<a name="line.286"></a>
+<span class="sourceLineNo">287</span>                dfList.add(new DF(tmpFile, 30000));<a name="line.287"></a>
+<span class="sourceLineNo">288</span><a name="line.288"></a>
+<span class="sourceLineNo">289</span>              } catch (DiskErrorException de) {<a name="line.289"></a>
+<span class="sourceLineNo">290</span>                LOG.warn( localDirs[i] + " is not writable\n", de);<a name="line.290"></a>
+<span class="sourceLineNo">291</span>              }<a name="line.291"></a>
+<span class="sourceLineNo">292</span>            } else {<a name="line.292"></a>
+<span class="sourceLineNo">293</span>              LOG.warn( "Failed to create " + localDirs[i]);<a name="line.293"></a>
+<span class="sourceLineNo">294</span>            }<a name="line.294"></a>
+<span class="sourceLineNo">295</span>          } catch (IOException ie) { <a name="line.295"></a>
+<span class="sourceLineNo">296</span>            LOG.warn( "Failed to create " + localDirs[i] + ": " +<a name="line.296"></a>
+<span class="sourceLineNo">297</span>                ie.getMessage() + "\n", ie);<a name="line.297"></a>
+<span class="sourceLineNo">298</span>          } //ignore<a name="line.298"></a>
+<span class="sourceLineNo">299</span>        }<a name="line.299"></a>
+<span class="sourceLineNo">300</span>        localDirs = dirs.toArray(new String[dirs.size()]);<a name="line.300"></a>
+<span class="sourceLineNo">301</span>        dirDF = dfList.toArray(new DF[dirs.size()]);<a name="line.301"></a>
+<span class="sourceLineNo">302</span>        savedLocalDirs = newLocalDirs;<a name="line.302"></a>
+<span class="sourceLineNo">303</span>        <a name="line.303"></a>
+<span class="sourceLineNo">304</span>        // randomize the first disk picked in the round-robin selection <a name="line.304"></a>
+<span class="sourceLineNo">305</span>        dirNumLastAccessed = dirIndexRandomizer.nextInt(dirs.size());<a name="line.305"></a>
+<span class="sourceLineNo">306</span>      }<a name="line.306"></a>
+<span class="sourceLineNo">307</span>    }<a name="line.307"></a>
+<span class="sourceLineNo">308</span><a name="line.308"></a>
+<span class="sourceLineNo">309</span>    private Path createPath(String path, <a name="line.309"></a>
+<span class="sourceLineNo">310</span>        boolean checkWrite) throws IOException {<a name="line.310"></a>
+<span class="sourceLineNo">311</span>      Path file = new Path(new Path(localDirs[dirNumLastAccessed]),<a name="line.311"></a>
+<span class="sourceLineNo">312</span>                                    path);<a name="line.312"></a>
+<span class="sourceLineNo">313</span>      if (checkWrite) {<a name="line.313"></a>
+<span class="sourceLineNo">314</span>        //check whether we are able to create a directory here. If the disk<a name="line.314"></a>
+<span class="sourceLineNo">315</span>        //happens to be RDONLY we will fail<a name="line.315"></a>
+<span class="sourceLineNo">316</span>        try {<a name="line.316"></a>
+<span class="sourceLineNo">317</span>          DiskChecker.checkDir(new File(file.getParent().toUri().getPath()));<a name="line.317"></a>
+<span class="sourceLineNo">318</span>          return file;<a name="line.318"></a>
+<span class="sourceLineNo">319</span>        } catch (DiskErrorException d) {<a name="line.319"></a>
+<span class="sourceLineNo">320</span>          LOG.warn("Disk Error Exception: ", d);<a name="line.320"></a>
+<span class="sourceLineNo">321</span>          return null;<a name="line.321"></a>
+<span class="sourceLineNo">322</span>        }<a name="line.322"></a>
+<span class="sourceLineNo">323</span>      }<a name="line.323"></a>
+<span class="sourceLineNo">324</span>      return file;<a name="line.324"></a>
+<span class="sourceLineNo">325</span>    }<a name="line.325"></a>
+<span class="sourceLineNo">326</span><a name="line.326"></a>
+<span class="sourceLineNo">327</span>    /**<a name="line.327"></a>
+<span class="sourceLineNo">328</span>     * Get the current directory index.<a name="line.328"></a>
+<span class="sourceLineNo">329</span>     * @return the current directory index.<a name="line.329"></a>
+<span class="sourceLineNo">330</span>     */<a name="line.330"></a>
+<span class="sourceLineNo">331</span>    int getCurrentDirectoryIndex() {<a name="line.331"></a>
+<span class="sourceLineNo">332</span>      return dirNumLastAccessed;<a name="line.332"></a>
+<span class="sourceLineNo">333</span>    }<a name="line.333"></a>
+<span class="sourceLineNo">334</span><a name="line.334"></a>
+<span class="sourceLineNo">335</span>    /** Get a path from the local FS. If size is known, we go<a name="line.335"></a>
+<span class="sourceLineNo">336</span>     *  round-robin over the set of disks (via the configured dirs) and return<a name="line.336"></a>
+<span class="sourceLineNo">337</span>     *  the first complete path which has enough space.<a name="line.337"></a>
+<span class="sourceLineNo">338</span>     *  <a name="line.338"></a>
+<span class="sourceLineNo">339</span>     *  If size is not known, use roulette selection -- pick directories<a name="line.339"></a>
+<span class="sourceLineNo">340</span>     *  with probability proportional to their available space.<a name="line.340"></a>
+<span class="sourceLineNo">341</span>     */<a name="line.341"></a>
+<span class="sourceLineNo">342</span>    public synchronized Path getLocalPathForWrite(String pathStr, long size, <a name="line.342"></a>
+<span class="sourceLineNo">343</span>        Configuration conf, boolean checkWrite) throws IOException {<a name="line.343"></a>
+<span class="sourceLineNo">344</span>      confChanged(conf);<a name="line.344"></a>
+<span class="sourceLineNo">345</span>      int numDirs = localDirs.length;<a name="line.345"></a>
+<span class="sourceLineNo">346</span>      int numDirsSearched = 0;<a name="line.346"></a>
+<span class="sourceLineNo">347</span>      //remove the leading slash from the path (to make sure that the uri<a name="line.347"></a>
+<span class="sourceLineNo">348</span>      //resolution results in a valid path on the dir being checked)<a name="line.348"></a>
+<span class="sourceLineNo">349</span>      if (pathStr.startsWith("/")) {<a name="line.349"></a>
+<span class="sourceLineNo">350</span>        pathStr = pathStr.substring(1);<a name="line.350"></a>
+<span class="sourceLineNo">351</span>      }<a name="line.351"></a>
+<span class="sourceLineNo">352</span>      Path returnPath = null;<a name="line.352"></a>
+<span class="sourceLineNo">353</span>      <a name="line.353"></a>
+<span class="sourceLineNo">354</span>      if(size == SIZE_UNKNOWN) {  //do roulette selection: pick dir with probability <a name="line.354"></a>
+<span class="sourceLineNo">355</span>                    //proportional to available size<a name="line.355"></a>
+<span class="sourceLineNo">356</span>        long[] availableOnDisk = new long[dirDF.length];<a name="line.356"></a>
+<span class="sourceLineNo">357</span>        long totalAvailable = 0;<a name="line.357"></a>
+<span class="sourceLineNo">358</span>        <a name="line.358"></a>
+<span class="sourceLineNo">359</span>            //build the "roulette wheel"<a name="line.359"></a>
+<span class="sourceLineNo">360</span>        for(int i =0; i &lt; dirDF.length; ++i) {<a name="line.360"></a>
+<span class="sourceLineNo">361</span>          availableOnDisk[i] = dirDF[i].getAvailable();<a name="line.361"></a>
+<span class="sourceLineNo">362</span>          totalAvailable += availableOnDisk[i];<a name="line.362"></a>
+<span class="sourceLineNo">363</span>        }<a name="line.363"></a>
+<span class="sourceLineNo">364</span><a name="line.364"></a>
+<span class="sourceLineNo">365</span>        if (totalAvailable == 0){<a name="line.365"></a>
+<span class="sourceLineNo">366</span>          throw new DiskErrorException("No space available in any of the local directories.");<a name="line.366"></a>
+<span class="sourceLineNo">367</span>        }<a name="line.367"></a>
+<span class="sourceLineNo">368</span><a name="line.368"></a>
+<span class="sourceLineNo">369</span>        // Keep rolling the wheel till we get a valid path<a name="line.369"></a>
+<span class="sourceLineNo">370</span>        Random r = new java.util.Random();<a name="line.370"></a>
+<span class="sourceLineNo">371</span>        while (numDirsSearched &lt; numDirs &amp;&amp; returnPath == null) {<a name="line.371"></a>
+<span class="sourceLineNo">372</span>          long randomPosition = (r.nextLong() &gt;&gt;&gt; 1) % totalAvailable;<a name="line.372"></a>
+<span class="sourceLineNo">373</span>          int dir = 0;<a name="line.373"></a>
+<span class="sourceLineNo">374</span>          while (randomPosition &gt; availableOnDisk[dir]) {<a name="line.374"></a>
+<span class="sourceLineNo">375</span>            randomPosition -= availableOnDisk[dir];<a name="line.375"></a>
+<span class="sourceLineNo">376</span>            dir++;<a name="line.376"></a>
+<span class="sourceLineNo">377</span>          }<a name="line.377"></a>
+<span class="sourceLineNo">378</span>          dirNumLastAccessed = dir;<a name="line.378"></a>
+<span class="sourceLineNo">379</span>          returnPath = createPath(pathStr, checkWrite);<a name="line.379"></a>
+<span class="sourceLineNo">380</span>          if (returnPath == null) {<a name="line.380"></a>
+<span class="sourceLineNo">381</span>            totalAvailable -= availableOnDisk[dir];<a name="line.381"></a>
+<span class="sourceLineNo">382</span>            availableOnDisk[dir] = 0; // skip this disk<a name="line.382"></a>
+<span class="sourceLineNo">383</span>            numDirsSearched++;<a name="line.383"></a>
+<span class="sourceLineNo">384</span>          }<a name="line.384"></a>
+<span class="sourceLineNo">385</span>        }<a name="line.385"></a>
+<span class="sourceLineNo">386</span>      } else {<a name="line.386"></a>
+<span class="sourceLineNo">387</span>        while (numDirsSearched &lt; numDirs &amp;&amp; returnPath == null) {<a name="line.387"></a>
+<span class="sourceLineNo">388</span>          long capacity = dirDF[dirNumLastAccessed].getAvailable();<a name="line.388"></a>
+<span class="sourceLineNo">389</span>          if (capacity &gt; size) {<a name="line.389"></a>
+<span class="sourceLineNo">390</span>            returnPath = createPath(pathStr, checkWrite);<a name="line.390"></a>
+<span class="sourceLineNo">391</span>          }<a name="line.391"></a>
+<span class="sourceLineNo">392</span>          dirNumLastAccessed++;<a name="line.392"></a>
+<span class="sourceLineNo">393</span>          dirNumLastAccessed = dirNumLastAccessed % numDirs; <a name="line.393"></a>
+<span class="sourceLineNo">394</span>          numDirsSearched++;<a name="line.394"></a>
+<span class="sourceLineNo">395</span>        } <a name="line.395"></a>
+<span class="sourceLineNo">396</span>      }<a name="line.396"></a>
+<span class="sourceLineNo">397</span>      if (returnPath != null) {<a name="line.397"></a>
+<span class="sourceLineNo">398</span>        return returnPath;<a name="line.398"></a>
+<span class="sourceLineNo">399</span>      }<a name="line.399"></a>
+<span class="sourceLineNo">400</span>      <a name="line.400"></a>
+<span class="sourceLineNo">401</span>      //no path found<a name="line.401"></a>
+<span class="sourceLineNo">402</span>      throw new DiskErrorException("Could not find any valid local " +<a name="line.402"></a>
+<span class="sourceLineNo">403</span>          "directory for " + pathStr);<a name="line.403"></a>
+<span class="sourceLineNo">404</span>    }<a name="line.404"></a>
+<span class="sourceLineNo">405</span><a name="line.405"></a>
+<span class="sourceLineNo">406</span>    /** Creates a file on the local FS. Pass size as <a name="line.406"></a>
+<span class="sourceLineNo">407</span>     * {@link LocalDirAllocator.SIZE_UNKNOWN} if not known apriori. We<a name="line.407"></a>
+<span class="sourceLineNo">408</span>     *  round-robin over the set of disks (via the configured dirs) and return<a name="line.408"></a>
+<span class="sourceLineNo">409</span>     *  a file on the first path which has enough space. The file is guaranteed<a name="line.409"></a>
+<span class="sourceLineNo">410</span>     *  to go away when the JVM exits.<a name="line.410"></a>
+<span class="sourceLineNo">411</span>     */<a name="line.411"></a>
+<span class="sourceLineNo">412</span>    public File createTmpFileForWrite(String pathStr, long size, <a name="line.412"></a>
+<span class="sourceLineNo">413</span>        Configuration conf) throws IOException {<a name="line.413"></a>
+<span class="sourceLineNo">414</span><a name="line.414"></a>
+<span class="sourceLineNo">415</span>      // find an appropriate directory<a name="line.415"></a>
+<span class="sourceLineNo">416</span>      Path path = getLocalPathForWrite(pathStr, size, conf, true);<a name="line.416"></a>
+<span class="sourceLineNo">417</span>      File dir = new File(path.getParent().toUri().getPath());<a name="line.417"></a>
+<span class="sourceLineNo">418</span>      String prefix = path.getName();<a name="line.418"></a>
+<span class="sourceLineNo">419</span><a name="line.419"></a>
+<span class="sourceLineNo">420</span>      // create a temp file on this directory<a name="line.420"></a>
+<span class="sourceLineNo">421</span>      File result = File.createTempFile(prefix, null, dir);<a name="line.421"></a>
+<span class="sourceLineNo">422</span>      result.deleteOnExit();<a name="line.422"></a>
+<span class="sourceLineNo">423</span>      return result;<a name="line.423"></a>
+<span class="sourceLineNo">424</span>    }<a name="line.424"></a>
+<span class="sourceLineNo">425</span><a name="line.425"></a>
+<span class="sourceLineNo">426</span>    /** Get a path from the local FS for reading. We search through all the<a name="line.426"></a>
+<span class="sourceLineNo">427</span>     *  configured dirs for the file's existence and return the complete<a name="line.427"></a>
+<span class="sourceLineNo">428</span>     *  path to the file when we find one <a name="line.428"></a>
+<span class="sourceLineNo">429</span>     */<a name="line.429"></a>
+<span class="sourceLineNo">430</span>    public synchronized Path getLocalPathToRead(String pathStr, <a name="line.430"></a>
+<span class="sourceLineNo">431</span>        Configuration conf) throws IOException {<a name="line.431"></a>
+<span class="sourceLineNo">432</span>      confChanged(conf);<a name="line.432"></a>
+<span class="sourceLineNo">433</span>      int numDirs = localDirs.length;<a name="line.433"></a>
+<span class="sourceLineNo">434</span>      int numDirsSearched = 0;<a name="line.434"></a>
+<span class="sourceLineNo">435</span>      //remove the leading slash from the path (to make sure that the uri<a name="line.435"></a>
+<span class="sourceLineNo">436</span>      //resolution results in a valid path on the dir being checked)<a name="line.436"></a>
+<span class="sourceLineNo">437</span>      if (pathStr.startsWith("/")) {<a name="line.437"></a>
+<span class="sourceLineNo">438</span>        pathStr = pathStr.substring(1);<a name="line.438"></a>
+<span class="sourceLineNo">439</span>      }<a name="line.439"></a>
+<span class="sourceLineNo">440</span>      while (numDirsSearched &lt; numDirs) {<a name="line.440"></a>
+<span class="sourceLineNo">441</span>        Path file = new Path(localDirs[numDirsSearched], pathStr);<a name="line.441"></a>
+<span class="sourceLineNo">442</span>        if (localFS.exists(file)) {<a name="line.442"></a>
+<span class="sourceLineNo">443</span>          return file;<a name="line.443"></a>
+<span class="sourceLineNo">444</span>        }<a name="line.444"></a>
+<span class="sourceLineNo">445</span>        numDirsSearched++;<a name="line.445"></a>
+<span class="sourceLineNo">446</span>      }<a name="line.446"></a>
+<span class="sourceLineNo">447</span><a name="line.447"></a>
+<span class="sourceLineNo">448</span>      //no path found<a name="line.448"></a>
+<span class="sourceLineNo">449</span>      throw new DiskErrorException ("Could not find " + pathStr +" in any of" +<a name="line.449"></a>
+<span class="sourceLineNo">450</span>      " the configured local directories");<a name="line.450"></a>
+<span class="sourceLineNo">451</span>    }<a name="line.451"></a>
+<span class="sourceLineNo">452</span><a name="line.452"></a>
+<span class="sourceLineNo">453</span>    private static class PathIterator implements Iterator&lt;Path&gt;, Iterable&lt;Path&gt; {<a name="line.453"></a>
+<span class="sourceLineNo">454</span>      private final FileSystem fs;<a name="line.454"></a>
+<span class="sourceLineNo">455</span>      private final String pathStr;<a name="line.455"></a>
+<span class="sourceLineNo">456</span>      private int i = 0;<a name="line.456"></a>
+<span class="sourceLineNo">457</span>      private final String[] rootDirs;<a name="line.457"></a>
+<span class="sourceLineNo">458</span>      private Path next = null;<a name="line.458"></a>
+<span class="sourceLineNo">459</span><a name="line.459"></a>
+<span class="sourceLineNo">460</span>      private PathIterator(FileSystem fs, String pathStr, String[] rootDirs)<a name="line.460"></a>
+<span class="sourceLineNo">461</span>          throws IOException {<a name="line.461"></a>
+<span class="sourceLineNo">462</span>        this.fs = fs;<a name="line.462"></a>
+<span class="sourceLineNo">463</span>        this.pathStr = pathStr;<a name="line.463"></a>
+<span class="sourceLineNo">464</span>        this.rootDirs = rootDirs;<a name="line.464"></a>
+<span class="sourceLineNo">465</span>        advance();<a name="line.465"></a>
+<span class="sourceLineNo">466</span>      }<a name="line.466"></a>
+<span class="sourceLineNo">467</span><a name="line.467"></a>
+<span class="sourceLineNo">468</span>      @Override<a name="line.468"></a>
+<span class="sourceLineNo">469</span>      public boolean hasNext() {<a name="line.469"></a>
+<span class="sourceLineNo">470</span>        return next != null;<a name="line.470"></a>
+<span class="sourceLineNo">471</span>      }<a name="line.471"></a>
+<span class="sourceLineNo">472</span><a name="line.472"></a>
+<span class="sourceLineNo">473</span>      private void advance() throws IOException {<a name="line.473"></a>
+<span class="sourceLineNo">474</span>        while (i &lt; rootDirs.length) {<a name="line.474"></a>
+<span class="sourceLineNo">475</span>          next = new Path(rootDirs[i++], pathStr);<a name="line.475"></a>
+<span class="sourceLineNo">476</span>          if (fs.exists(next)) {<a name="line.476"></a>
+<span class="sourceLineNo">477</span>            return;<a name="line.477"></a>
+<span class="sourceLineNo">478</span>          }<a name="line.478"></a>
+<span class="sourceLineNo">479</span>        }<a name="line.479"></a>
+<span class="sourceLineNo">480</span>        next = null;<a name="line.480"></a>
+<span class="sourceLineNo">481</span>      }<a name="line.481"></a>
+<span class="sourceLineNo">482</span><a name="line.482"></a>
+<span class="sourceLineNo">483</span>      @Override<a name="line.483"></a>
+<span class="sourceLineNo">484</span>      public Path next() {<a name="line.484"></a>
+<span class="sourceLineNo">485</span>        final Path result = next;<a name="line.485"></a>
+<span class="sourceLineNo">486</span>        try {<a name="line.486"></a>
+<span class="sourceLineNo">487</span>          advance();<a name="line.487"></a>
+<span class="sourceLineNo">488</span>        } catch (IOException ie) {<a name="line.488"></a>
+<span class="sourceLineNo">489</span>          throw new RuntimeException("Can't check existance of " + next, ie);<a name="line.489"></a>
+<span class="sourceLineNo">490</span>        }<a name="line.490"></a>
+<span class="sourceLineNo">491</span>        if (result == null) {<a name="line.491"></a>
+<span class="sourceLineNo">492</span>          throw new NoSuchElementException();<a name="line.492"></a>
+<span class="sourceLineNo">493</span>        }<a name="line.493"></a>
+<span class="sourceLineNo">494</span>        return result;<a name="line.494"></a>
+<span class="sourceLineNo">495</span>      }<a name="line.495"></a>
+<span class="sourceLineNo">496</span><a name="line.496"></a>
+<span class="sourceLineNo">497</span>      @Override<a name="line.497"></a>
+<span class="sourceLineNo">498</span>      public void remove() {<a name="line.498"></a>
+<span class="sourceLineNo">499</span>        throw new UnsupportedOperationException("read only iterator");<a name="line.499"></a>
+<span class="sourceLineNo">500</span>      }<a name="line.500"></a>
+<span class="sourceLineNo">501</span><a name="line.501"></a>
+<span class="sourceLineNo">502</span>      @Override<a name="line.502"></a>
+<span class="sourceLineNo">503</span>      public Iterator&lt;Path&gt; iterator() {<a name="line.503"></a>
+<span class="sourceLineNo">504</span>        return this;<a name="line.504"></a>
+<span class="sourceLineNo">505</span>      }<a name="line.505"></a>
+<span class="sourceLineNo">506</span>    }<a name="line.506"></a>
+<span class="sourceLineNo">507</span><a name="line.507"></a>
+<span class="sourceLineNo">508</span>    /**<a name="line.508"></a>
+<span class="sourceLineNo">509</span>     * Get all of the paths that currently exist in the working directories.<a name="line.509"></a>
+<span class="sourceLineNo">510</span>     * @param pathStr the path underneath the roots<a name="line.510"></a>
+<span class="sourceLineNo">511</span>     * @param conf the configuration to look up the roots in<a name="line.511"></a>
+<span class="sourceLineNo">512</span>     * @return all of the paths that exist under any of the roots<a name="line.512"></a>
+<span class="sourceLineNo">513</span>     * @throws IOException<a name="line.513"></a>
+<span class="sourceLineNo">514</span>     */<a name="line.514"></a>
+<span class="sourceLineNo">515</span>    synchronized Iterable&lt;Path&gt; getAllLocalPathsToRead(String pathStr,<a name="line.515"></a>
+<span class="sourceLineNo">516</span>        Configuration conf) throws IOException {<a name="line.516"></a>
+<span class="sourceLineNo">517</span>      confChanged(conf);<a name="line.517"></a>
+<span class="sourceLineNo">518</span>      if (pathStr.startsWith("/")) {<a name="line.518"></a>
+<span class="sourceLineNo">519</span>        pathStr = pathStr.substring(1);<a name="line.519"></a>
+<span class="sourceLineNo">520</span>      }<a name="line.520"></a>
+<span class="sourceLineNo">521</span>      return new PathIterator(localFS, pathStr, localDirs);<a name="line.521"></a>
+<span class="sourceLineNo">522</span>    }<a name="line.522"></a>
+<span class="sourceLineNo">523</span><a name="line.523"></a>
+<span class="sourceLineNo">524</span>    /** We search through all the configured dirs for the file's existence<a name="line.524"></a>
+<span class="sourceLineNo">525</span>     *  and return true when we find one <a name="line.525"></a>
+<span class="sourceLineNo">526</span>     */<a name="line.526"></a>
+<span class="sourceLineNo">527</span>    public synchronized boolean ifExists(String pathStr,Configuration conf) {<a name="line.527"></a>
+<span class="sourceLineNo">528</span>      try {<a name="line.528"></a>
+<span class="sourceLineNo">529</span>        int numDirs = localDirs.length;<a name="line.529"></a>
+<span class="sourceLineNo">530</span>        int numDirsSearched = 0;<a name="line.530"></a>
+<span class="sourceLineNo">531</span>        //remove the leading slash from the path (to make sure that the uri<a name="line.531"></a>
+<span class="sourceLineNo">532</span>        //resolution results in a valid path on the dir being checked)<a name="line.532"></a>
+<span class="sourceLineNo">533</span>        if (pathStr.startsWith("/")) {<a name="line.533"></a>
+<span class="sourceLineNo">534</span>          pathStr = pathStr.substring(1);<a name="line.534"></a>
+<span class="sourceLineNo">535</span>        }<a name="line.535"></a>
+<span class="sourceLineNo">536</span>        while (numDirsSearched &lt; numDirs) {<a name="line.536"></a>
+<span class="sourceLineNo">537</span>          Path file = new Path(localDirs[numDirsSearched], pathStr);<a name="line.537"></a>
+<span class="sourceLineNo">538</span>          if (localFS.exists(file)) {<a name="line.538"></a>
+<span class="sourceLineNo">539</span>            return true;<a name="line.539"></a>
+<span class="sourceLineNo">540</span>          }<a name="line.540"></a>
+<span class="sourceLineNo">541</span>          numDirsSearched++;<a name="line.541"></a>
+<span class="sourceLineNo">542</span>        }<a name="line.542"></a>
+<span class="sourceLineNo">543</span>      } catch (IOException e) {<a name="line.543"></a>
+<span class="sourceLineNo">544</span>        // IGNORE and try again<a name="line.544"></a>
+<span class="sourceLineNo">545</span>      }<a name="line.545"></a>
+<span class="sourceLineNo">546</span>      return false;<a name="line.546"></a>
+<span class="sourceLineNo">547</span>    }<a name="line.547"></a>
+<span class="sourceLineNo">548</span>  }<a name="line.548"></a>
+<span class="sourceLineNo">549</span>}<a name="line.549"></a>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>
+</div>
+</body>
+</html>
